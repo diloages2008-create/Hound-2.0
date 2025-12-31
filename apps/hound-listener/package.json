@@ -1,0 +1,61 @@
+{
+    "name":  "Hound",
+    "version":  "0.1.0",
+    "private":  true,
+    "type":  "module",
+    "description":  "Hound Phase 1 desktop app",
+    "main":  "electron/main.cjs",
+    "scripts":  {
+                    "dev:web":  "vite --config ui/vite.config.js",
+        "dev:app":  "powershell -NoProfile -Command \"Start-Process -FilePath npm -ArgumentList 'run','dev:web'; Start-Sleep -Seconds 2; npm run electron\"",
+        "start":  "npm run dev:app",
+                    "build":  "vite build --config ui/vite.config.js",
+                    "preview":  "vite preview --config ui/vite.config.js",
+        "electron":  "node ./electron/launch.cjs",
+                    "pack":  "npm run build \u0026\u0026 electron-builder --dir",
+                    "dist":  "npm run build \u0026\u0026 electron-builder --win nsis",
+                    "den":  "echo admin panel removed"
+                },
+    "dependencies":  {
+                         "react":  "^18.2.0",
+                         "react-dom":  "^18.2.0"
+                     },
+    "devDependencies":  {
+                            "@vitejs/plugin-react":  "^4.2.0",
+                            "concurrently":  "^8.2.2",
+                            "electron":  "^27.1.2",
+                            "vite":  "^5.0.3",
+                            "electron-builder":  "^24.13.3"
+                        },
+    "build":  {
+                  "appId":  "com.Hound.app",
+                  "productName":  "Hound",
+                  "files":  [
+                                "dist/**",
+                                "electron/**",
+                                "package.json"
+                            ],
+                  "directories":  {
+                                      "output":  "release"
+                                  },
+                  "extraResources":  [
+                                         {
+                                             "from":  "electron/ffmpeg",
+                                             "to":  "ffmpeg"
+                                         }
+                                     ],
+                  "win":  {
+                              "target":  "nsis",
+                              "signAndEditExecutable":  false
+                          },
+                  "asar":  true,
+                  "nsis":  {
+                               "oneClick":  false,
+                               "allowToChangeInstallationDirectory":  true,
+                               "createDesktopShortcut":  true,
+                               "createStartMenuShortcut":  true,
+                               "shortcutName":  "Hound"
+                           }
+              }
+}
+

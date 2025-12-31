@@ -1,0 +1,4067 @@
+import React, { useEffect, useMemo, useRef, useState } from "react";
+
+// Track shape contract:
+// Track {
+//   id: string, path: string, title: string, artist: string,
+//   rotation: boolean, rotationManual: null | boolean, saved: boolean,
+//   rotationScore: number, lastPositiveListenAt: string | null,
+//   lastNegativeListenAt: string | null,
+//   rotationOverride: "none" | "force_on" | "force_off",
+//   playCountTotal: number,
+//   playHistory: Array<PlayTelemetry>
+// }
+
+// PlayTelemetry contract:
+// {
+//   play_start_time: string,
+//   play_end_time: string,
+//   play_duration_seconds: number,
+//   track_total_duration: number,
+//   percent_listened: number,
+//   skipped_early: boolean,
+//   replayed_same_session: number,
+//   completed_play: boolean,
+//   manual_skip: boolean,
+//   auto_advance: boolean,
+//   timestamp: string
+// }
+
+// SessionEndPayload contract:
+// { listenedSeconds: number, tracksPlayed: number, skips: number }
+
+const SHARE_READY = true;
+const GATE_DISABLED = true;
+
+const Icon = ({ children, size = 18 }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    {children}
+  </svg>
+);
+
+const IconMenu = () => (
+  <Icon>
+    <line x1="3" y1="6" x2="21" y2="6" />
+    <line x1="3" y1="12" x2="21" y2="12" />
+    <line x1="3" y1="18" x2="21" y2="18" />
+  </Icon>
+);
+
+const IconSettings = () => (
+  <Icon>
+    <circle cx="12" cy="12" r="3" />
+    <path d="M19.4 15a1 1 0 0 0 .2 1.1l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1 1 0 0 0-1.1-.2 1 1 0 0 0-.6.9V21a2 2 0 1 1-4 0v-.1a1 1 0 0 0-.6-.9 1 1 0 0 0-1.1.2l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1 1 0 0 0 .2-1.1 1 1 0 0 0-.9-.6H3a2 2 0 1 1 0-4h.1a1 1 0 0 0 .9-.6 1 1 0 0 0-.2-1.1l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1 1 0 0 0 1.1.2 1 1 0 0 0 .6-.9V3a2 2 0 1 1 4 0v.1a1 1 0 0 0 .6.9 1 1 0 0 0 1.1-.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1 1 0 0 0-.2 1.1 1 1 0 0 0 .9.6H21a2 2 0 1 1 0 4h-.1a1 1 0 0 0-.9.6z" />
+  </Icon>
+);
+
+const IconHome = () => (
+  <Icon>
+    <path d="M3 10.5L12 3l9 7.5" />
+    <path d="M5 10v10h14V10" />
+  </Icon>
+);
+
+const IconLibrary = () => (
+  <Icon>
+    <rect x="4" y="3" width="6" height="18" rx="1" />
+    <rect x="14" y="3" width="6" height="18" rx="1" />
+  </Icon>
+);
+
+const IconSearch = () => (
+  <Icon>
+    <circle cx="11" cy="11" r="7" />
+    <line x1="21" y1="21" x2="16.6" y2="16.6" />
+  </Icon>
+);
+
+const IconPlaylists = () => (
+  <Icon>
+    <line x1="4" y1="6" x2="20" y2="6" />
+    <line x1="4" y1="12" x2="20" y2="12" />
+    <line x1="4" y1="18" x2="20" y2="18" />
+  </Icon>
+);
+
+const IconSave = ({ filled = false }) => (
+  <Icon>
+    <path
+      d="M12 21s-6-4.4-9-8.5C1 9 2.5 6 5.8 6c2 0 3.5 1.2 4.2 2.4C10.7 7.2 12.2 6 14.2 6 17.5 6 19 9 21 12.5 18 16.6 12 21 12 21z"
+      fill={filled ? "currentColor" : "none"}
+    />
+  </Icon>
+);
+
+const IconRotation = ({ slashed = false }) => (
+  <Icon>
+    <path d="M3 12a9 9 0 0 1 15.5-6.4" />
+    <polyline points="18 3 18 7 14 7" />
+    <path d="M21 12a9 9 0 0 1-15.5 6.4" />
+    <polyline points="6 21 6 17 10 17" />
+    {slashed ? <line x1="4" y1="4" x2="20" y2="20" /> : null}
+  </Icon>
+);
+
+const IconQueue = () => (
+  <Icon>
+    <line x1="4" y1="6" x2="20" y2="6" />
+    <line x1="4" y1="12" x2="20" y2="12" />
+    <line x1="4" y1="18" x2="12" y2="18" />
+    <polygon points="16,16 20,18 16,20" />
+  </Icon>
+);
+
+const IconPrev = () => (
+  <Icon>
+    <polygon points="11,19 3,12 11,5" />
+    <line x1="21" y1="5" x2="21" y2="19" />
+  </Icon>
+);
+
+const IconNext = () => (
+  <Icon>
+    <polygon points="13,5 21,12 13,19" />
+    <line x1="3" y1="5" x2="3" y2="19" />
+  </Icon>
+);
+
+const IconPlay = () => (
+  <Icon>
+    <polygon points="8,5 19,12 8,19" />
+  </Icon>
+);
+
+const IconPause = () => (
+  <Icon>
+    <rect x="6" y="5" width="4" height="14" />
+    <rect x="14" y="5" width="4" height="14" />
+  </Icon>
+);
+
+const IconVolume = () => (
+  <Icon>
+    <polygon points="3,9 7,9 12,5 12,19 7,15 3,15" />
+    <path d="M16 9a4 4 0 0 1 0 6" />
+    <path d="M18.5 6a7 7 0 0 1 0 12" />
+  </Icon>
+);
+
+const SUPABASE_URL = "https://rbhlvbutqzgqogsrqwet.supabase.co";
+const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJiaGx2YnV0cXpncW9nc3Jxd2V0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY5MDg5NDQsImV4cCI6MjA4MjQ4NDk0NH0.RTIUt8x3k4ziUNltGCrNkda7BRpoxsxGtJBPOo-gqVk";
+const GATE_BASE = `${SUPABASE_URL}/functions/v1`;
+const REDEEM_URL = `${GATE_BASE}/redeem`;
+const CHECKIN_URL = `${GATE_BASE}/checkin`;
+
+const styles = {
+  app: {
+    minHeight: "100vh",
+    display: "flex",
+    flexDirection: "column",
+    background: "#0b1120",
+    color: "#e5e7eb"
+  },
+  topBar: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderBottom: "1px solid #1f2937",
+    padding: "0 18px",
+    height: "56px"
+  },
+  topBarCenter: {
+    fontSize: "14px",
+    fontWeight: 700,
+    letterSpacing: "0.06em",
+    textTransform: "uppercase"
+  },
+  menuButton: {
+    border: "1px solid #334155",
+    borderRadius: "8px",
+    background: "transparent",
+    color: "#e5e7eb",
+    width: "36px",
+    height: "36px",
+    display: "grid",
+    placeItems: "center"
+  },
+  settingsButton: {
+    border: "1px solid #334155",
+    borderRadius: "8px",
+    background: "transparent",
+    color: "#e5e7eb",
+    width: "36px",
+    height: "36px",
+    display: "grid",
+    placeItems: "center"
+  },
+  brand: {
+    fontSize: "18px",
+    fontWeight: 700,
+    letterSpacing: "2px"
+  },
+  appBody: {
+    flex: 1,
+    display: "flex",
+    minHeight: 0
+  },
+  sidebar: {
+    width: "260px",
+    borderRight: "1px solid #1f2937",
+    padding: "12px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "6px",
+    background: "#0b1120"
+  },
+  sidebarHidden: {
+    width: "72px",
+    padding: "12px 8px"
+  },
+  sidebarButton: (active) => ({
+    border: "1px solid #1f2937",
+    borderRadius: "10px",
+    background: active ? "#12243a" : "#0f172a",
+    color: "#e5e7eb",
+    padding: "10px 12px",
+    minHeight: "44px",
+    textAlign: "left",
+    display: "flex",
+    gap: "10px",
+    alignItems: "center",
+    cursor: "pointer",
+    fontWeight: 600
+  }),
+  sidebarIcon: {
+    width: "18px",
+    textAlign: "center"
+  },
+  content: {
+    flex: 1,
+    display: "flex",
+    flexDirection: "column",
+    gap: "16px",
+    padding: "24px",
+    paddingBottom: "96px",
+    overflowY: "auto",
+    minHeight: 0
+  },
+  library: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "12px"
+  },
+  homePage: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "12px"
+  },
+  section: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "10px"
+  },
+  sectionTitle: {
+    fontSize: "13px",
+    fontWeight: 700,
+    letterSpacing: "0.08em",
+    textTransform: "uppercase",
+    color: "#cbd5f5"
+  },
+  rowScroll: {
+    display: "grid",
+    gridAutoFlow: "column",
+    gridAutoColumns: "minmax(160px, 1fr)",
+    gap: "12px",
+    overflowX: "auto",
+    paddingBottom: "6px"
+  },
+  tile: {
+    border: "1px solid #1f2937",
+    borderRadius: "12px",
+    padding: "12px",
+    background: "#0f172a",
+    display: "flex",
+    flexDirection: "column",
+    gap: "6px",
+    minWidth: "160px",
+    cursor: "pointer"
+  },
+  tileArt: {
+    width: "100%",
+    aspectRatio: "1 / 1",
+    borderRadius: "8px",
+    background: "#111827",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    color: "#64748b",
+    fontSize: "10px",
+    fontWeight: 700
+  },
+  tileTitle: {
+    fontWeight: 700,
+    fontSize: "13px"
+  },
+  tileArtist: {
+    fontSize: "12px",
+    color: "#9ca3af"
+  },
+  homeCard: {
+    border: "1px solid #1f2937",
+    borderRadius: "12px",
+    padding: "14px",
+    background: "#0f172a",
+    display: "flex",
+    flexDirection: "column",
+    gap: "8px"
+  },
+  homeCardTitle: {
+    fontSize: "13px",
+    fontWeight: 700
+  },
+  homeActions: {
+    display: "flex",
+    gap: "8px",
+    flexWrap: "wrap"
+  },
+  playlistPage: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "12px"
+  },
+  queuePage: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "12px"
+  },
+  searchPage: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "12px"
+  },
+  settingsPage: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "16px"
+  },
+  settingsSection: {
+    border: "1px solid #1f2937",
+    borderRadius: "12px",
+    padding: "14px",
+    background: "#0f172a",
+    display: "flex",
+    flexDirection: "column",
+    gap: "8px"
+  },
+  settingRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "10px",
+    fontSize: "13px"
+  },
+  input: {
+    border: "1px solid #334155",
+    background: "transparent",
+    color: "#e5e7eb",
+    padding: "10px 12px",
+    borderRadius: "8px"
+  },
+  libraryButtons: {
+    display: "flex",
+    gap: "10px",
+    flexWrap: "wrap"
+  },
+  headerRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "12px"
+  },
+  primaryButton: {
+    border: "none",
+    background: "#38bdf8",
+    color: "#0a0f1a",
+    padding: "10px 14px",
+    borderRadius: "8px",
+    fontWeight: 700
+  },
+  secondaryButton: {
+    border: "1px solid #334155",
+    background: "transparent",
+    color: "#e5e7eb",
+    padding: "10px 14px",
+    borderRadius: "8px",
+    fontWeight: 600
+  },
+  listTitle: {
+    fontSize: "14px",
+    fontWeight: 700,
+    margin: "6px 0"
+  },
+  table: {
+    display: "grid",
+    gap: "6px"
+  },
+  tableHeader: {
+    display: "grid",
+    gridTemplateColumns: "2fr 1fr 1fr 80px 90px",
+    fontSize: "11px",
+    letterSpacing: "0.08em",
+    textTransform: "uppercase",
+    color: "#94a3b8",
+    padding: "0 8px"
+  },
+  tableRow: (active) => ({
+    display: "grid",
+    gridTemplateColumns: "2fr 1fr 1fr 80px 90px",
+    alignItems: "center",
+    gap: "8px",
+    padding: "10px 8px",
+    minHeight: "52px",
+    borderRadius: "10px",
+    border: "1px solid #1f2937",
+    background: active ? "#12243a" : "#0f172a",
+    cursor: "pointer"
+  }),
+  tableCell: {
+    fontSize: "13px"
+  },
+  tableMeta: {
+    fontSize: "12px",
+    color: "#9ca3af"
+  },
+  iconButton: {
+    border: "1px solid #334155",
+    borderRadius: "8px",
+    background: "transparent",
+    color: "#e5e7eb",
+    width: "36px",
+    height: "36px",
+    display: "grid",
+    placeItems: "center"
+  },
+  iconButtonActive: {
+    background: "#1e293b"
+  },
+  list: {
+    listStyle: "none",
+    margin: 0,
+    padding: 0,
+    display: "flex",
+    flexDirection: "column",
+    gap: "8px"
+  },
+  row: (active) => ({
+    padding: "10px 12px",
+    borderRadius: "8px",
+    border: "1px solid #1f2937",
+    background: active ? "#12243a" : "#0f172a",
+    cursor: "pointer",
+    display: "flex",
+    flexDirection: "column",
+    gap: "4px"
+  }),
+  rowTitle: {
+    fontWeight: 700,
+    fontSize: "14px",
+    display: "flex",
+    alignItems: "center",
+    gap: "8px"
+  },
+  rowArtist: {
+    fontSize: "12px",
+    color: "#9ca3af"
+  },
+  rowActions: {
+    display: "flex",
+    gap: "8px",
+    alignItems: "center"
+  },
+  menuPopup: {
+    position: "fixed",
+    background: "#0f172a",
+    border: "1px solid #1f2937",
+    borderRadius: "10px",
+    padding: "6px",
+    minWidth: "180px",
+    zIndex: 50,
+    boxShadow: "0 10px 30px rgba(0,0,0,0.35)"
+  },
+  menuItem: {
+    padding: "8px 10px",
+    borderRadius: "8px",
+    cursor: "pointer",
+    fontSize: "13px",
+    color: "#e5e7eb"
+  },
+  menuItemMuted: {
+    color: "#94a3b8"
+  },
+  menuDivider: {
+    height: "1px",
+    background: "#1f2937",
+    margin: "4px 0"
+  },
+  menuSub: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "4px",
+    marginTop: "6px"
+  },
+  queueButton: {
+    border: "1px solid #334155",
+    background: "transparent",
+    color: "#e5e7eb",
+    padding: "4px 8px",
+    borderRadius: "999px",
+    fontSize: "11px",
+    fontWeight: 600
+  },
+  queuePanel: {
+    border: "1px solid #1f2937",
+    borderRadius: "12px",
+    padding: "12px",
+    background: "#0f172a",
+    display: "flex",
+    flexDirection: "column",
+    gap: "10px"
+  },
+  queueHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    fontSize: "13px",
+    fontWeight: 700
+  },
+  queueNowPlaying: {
+    padding: "10px 12px",
+    borderRadius: "10px",
+    border: "1px solid #1f2937",
+    background: "#111827",
+    display: "flex",
+    flexDirection: "column",
+    gap: "4px"
+  },
+  queueNowLabel: {
+    fontSize: "11px",
+    color: "#9ca3af",
+    textTransform: "uppercase",
+    letterSpacing: "0.08em"
+  },
+  queueNowTitle: {
+    fontSize: "14px",
+    fontWeight: 700
+  },
+  queueNowArtist: {
+    fontSize: "12px",
+    color: "#9ca3af"
+  },
+  queueList: {
+    listStyle: "none",
+    margin: 0,
+    padding: 0,
+    display: "flex",
+    flexDirection: "column",
+    gap: "8px"
+  },
+  queueRow: {
+    border: "1px solid #1f2937",
+    borderRadius: "10px",
+    padding: "8px 10px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "8px"
+  },
+  queueMeta: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "2px"
+  },
+  queueTitle: {
+    fontSize: "13px",
+    fontWeight: 600
+  },
+  queueArtist: {
+    fontSize: "11px",
+    color: "#9ca3af"
+  },
+  queueActions: {
+    display: "flex",
+    gap: "6px",
+    alignItems: "center"
+  },
+  queueDrag: {
+    border: "1px dashed #334155",
+    background: "transparent",
+    color: "#9ca3af",
+    padding: "4px 8px",
+    borderRadius: "8px",
+    fontSize: "11px",
+    fontWeight: 600,
+    cursor: "grab"
+  },
+  queueActionButton: {
+    border: "1px solid #334155",
+    background: "transparent",
+    color: "#e5e7eb",
+    padding: "4px 8px",
+    borderRadius: "8px",
+    fontSize: "11px",
+    fontWeight: 600
+  },
+  empty: {
+    color: "#9ca3af",
+    fontSize: "13px"
+  },
+  badge: {
+    border: "1px solid #334155",
+    borderRadius: "999px",
+    padding: "2px 6px",
+    fontSize: "10px",
+    color: "#9ca3af",
+    textTransform: "uppercase",
+    letterSpacing: "0.08em"
+  },
+  playerWrap: {
+    display: "flex",
+    justifyContent: "center"
+  },
+  playerCard: {
+    width: "100%",
+    maxWidth: "420px",
+    background: "#121827",
+    borderRadius: "16px",
+    padding: "20px",
+    border: "1px solid #1f2937",
+    display: "flex",
+    flexDirection: "column",
+    gap: "16px"
+  },
+  cover: {
+    width: "100%",
+    aspectRatio: "1 / 1",
+    borderRadius: "12px",
+    background: "linear-gradient(135deg, #1f2937, #0f172a)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontWeight: 600,
+    color: "#94a3b8",
+    userSelect: "none"
+  },
+  trackTitle: {
+    fontSize: "18px",
+    fontWeight: 700,
+    margin: 0
+  },
+  trackArtist: {
+    fontSize: "13px",
+    color: "#9ca3af",
+    margin: "6px 0 0 0"
+  },
+  controls: {
+    display: "flex",
+    gap: "8px",
+    justifyContent: "center",
+    flexWrap: "wrap"
+  },
+  controlButton: {
+    border: "none",
+    background: "#1e293b",
+    color: "#e5e7eb",
+    padding: "8px 12px",
+    borderRadius: "8px",
+    fontWeight: 600,
+    minWidth: "70px"
+  },
+  playButton: {
+    background: "#38bdf8",
+    color: "#0a0f1a"
+  },
+  likeActive: {
+    background: "#dc2626",
+    color: "#fff"
+  },
+  saveActive: {
+    background: "#22c55e",
+    color: "#0a0f1a"
+  },
+  errorBanner: {
+    padding: "8px 12px",
+    borderRadius: "8px",
+    border: "1px solid #7f1d1d",
+    background: "#1f0b0b",
+    color: "#fecaca",
+    fontSize: "12px"
+  },
+  modalOverlay: {
+    position: "fixed",
+    inset: 0,
+    background: "rgba(0,0,0,0.6)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 20
+  },
+  modal: {
+    background: "#121827",
+    borderRadius: "12px",
+    padding: "18px",
+    border: "1px solid #1f2937",
+    width: "min(420px, 90vw)",
+    display: "flex",
+    flexDirection: "column",
+    gap: "10px"
+  },
+  loadingBarWrap: {
+    height: "6px",
+    borderRadius: "999px",
+    background: "#1f2937",
+    overflow: "hidden"
+  },
+  loadingBar: {
+    height: "100%",
+    width: "40%",
+    background: "#38bdf8"
+  },
+  modalButtons: {
+    display: "flex",
+    justifyContent: "flex-end",
+    gap: "8px",
+    marginTop: "10px"
+  },
+  nowPlayingBar: {
+    position: "fixed",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: "72px",
+    background: "#0f172a",
+    border: "1px solid #1f2937",
+    borderRadius: 0,
+    padding: "12px",
+    display: "grid",
+    gridTemplateColumns: "1fr 1.5fr 1fr",
+    alignItems: "center",
+    gap: "12px",
+    zIndex: 10,
+    cursor: "pointer"
+  },
+  nowPlayingLeft: {
+    display: "flex",
+    alignItems: "center",
+    gap: "10px",
+    minWidth: "260px"
+  },
+  nowPlayingArt: {
+    width: "48px",
+    height: "48px",
+    borderRadius: "8px",
+    background: "#111827",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    color: "#64748b",
+    fontSize: "10px",
+    fontWeight: 700
+  },
+  nowPlayingCenter: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "6px",
+    alignItems: "center",
+    padding: "0 12px"
+  },
+  nowPlayingRight: {
+    display: "flex",
+    justifyContent: "flex-end",
+    gap: "8px",
+    alignItems: "center",
+    minWidth: "320px"
+  },
+  nowPlayingInfo: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "2px",
+    minWidth: 0
+  },
+  nowPlayingContext: {
+    fontSize: "10px",
+    color: "#94a3b8",
+    textTransform: "uppercase",
+    letterSpacing: "0.08em"
+  },
+  nowPlayingTitle: {
+    fontSize: "13px",
+    fontWeight: 700,
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis"
+  },
+  nowPlayingArtist: {
+    fontSize: "11px",
+    color: "#9ca3af",
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis"
+  },
+  nowPlayingControls: {
+    display: "flex",
+    gap: "6px",
+    alignItems: "center"
+  },
+  nowPlayingButton: {
+    border: "1px solid #334155",
+    background: "transparent",
+    color: "#e5e7eb",
+    width: "36px",
+    height: "36px",
+    borderRadius: "8px",
+    display: "grid",
+    placeItems: "center"
+  },
+  nowPlayingProgressWrap: {
+    width: "100%",
+    height: "4px",
+    background: "#1f2937",
+    borderRadius: "999px",
+    overflow: "hidden"
+  },
+  nowPlayingProgress: {
+    height: "100%",
+    background: "#38bdf8",
+    width: "0%"
+  },
+  nowPlayingTime: {
+    fontSize: "11px",
+    color: "#9ca3af",
+    padding: "2px 6px",
+    borderRadius: "999px"
+  }
+};
+
+const getFileName = (filePath) => {
+  if (typeof filePath !== "string") return "Unknown file";
+  const parts = filePath.split(/[/\\]/);
+  return parts[parts.length - 1] || filePath;
+};
+
+const parseTrackMeta = (filePath) => {
+  const title = getFileName(filePath).replace(/\.[^/.\\]+$/, "") || "Unknown Title";
+  return { title, artist: "Unknown Artist" };
+};
+
+const getAlbumName = () => "Unknown Album";
+
+const MarqueeText = ({ text }) => (
+  <span className="marquee-static" aria-label={text}>
+    <span>{text}</span>
+  </span>
+);
+
+const getDeviceId = () => {
+  try {
+    const stored = localStorage.getItem("Hound.deviceId");
+    if (stored) return stored;
+    const id = typeof crypto !== "undefined" && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    localStorage.setItem("Hound.deviceId", id);
+    return id;
+  } catch {
+    return `Hound-${Date.now()}`;
+  }
+};
+
+const clearHoundStorage = () => {
+  try {
+    Object.keys(localStorage)
+      .filter((key) => key.startsWith("Hound."))
+      .forEach((key) => localStorage.removeItem(key));
+  } catch {
+    // ignore
+  }
+};
+
+const getContextLabel = (context) => {
+  if (!context || typeof context !== "object") return "Library";
+  return context.label || "Library";
+};
+
+const normalizeTrack = (track) => ({
+  ...track,
+  rotation: track.rotation ?? false,
+  rotationManual: track.rotationManual ?? null,
+  saved: track.saved ?? false,
+  rotationScore: Number.isFinite(track.rotationScore) ? track.rotationScore : 0,
+  lastPositiveListenAt: track.lastPositiveListenAt ?? null,
+  lastNegativeListenAt: track.lastNegativeListenAt ?? null,
+  rotationOverride: track.rotationOverride ?? "none",
+  playCountTotal: Number.isFinite(track.playCountTotal) ? track.playCountTotal : 0,
+  playHistory: Array.isArray(track.playHistory) ? track.playHistory : []
+});
+
+const useSessionStats = () => {
+  const statsRef = useRef({ listenedSeconds: 0, tracksPlayed: 0, skips: 0 });
+  const lastTimeRef = useRef(0);
+  const sessionActiveRef = useRef(false);
+
+  const startSessionIfNeeded = () => {
+    if (!sessionActiveRef.current) {
+      statsRef.current = { listenedSeconds: 0, tracksPlayed: 0, skips: 0 };
+      lastTimeRef.current = 0;
+      sessionActiveRef.current = true;
+    }
+  };
+
+  const markTrackPlayed = () => {
+    statsRef.current.tracksPlayed += 1;
+  };
+
+  const markSkip = () => {
+    statsRef.current.skips += 1;
+  };
+
+  const addListenedDelta = (delta) => {
+    if (delta > 0) {
+      statsRef.current.listenedSeconds += delta;
+    }
+  };
+
+  const endSession = () => {
+    sessionActiveRef.current = false;
+    return {
+      listenedSeconds: Number(statsRef.current.listenedSeconds.toFixed(1)),
+      tracksPlayed: statsRef.current.tracksPlayed,
+      skips: statsRef.current.skips
+    };
+  };
+
+  return {
+    statsRef,
+    lastTimeRef,
+    sessionActiveRef,
+    startSessionIfNeeded,
+    markTrackPlayed,
+    markSkip,
+    addListenedDelta,
+    endSession
+  };
+};
+
+export default function App() {
+  const [authState, setAuthState] = useState({ status: "authed", message: "" });
+  const [inviteCode, setInviteCode] = useState("");
+  const [inviteLabel, setInviteLabel] = useState("");
+  const [authError, setAuthError] = useState("");
+  const [authBusy, setAuthBusy] = useState(false);
+
+  const [screen, setScreen] = useState("home");
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [hoveredLibraryId, setHoveredLibraryId] = useState(null);
+  const [rotationMenu, setRotationMenu] = useState(null);
+  const [contextMenu, setContextMenu] = useState(null);
+  const [tracks, setTracks] = useState([]);
+  const [selectedTrackId, setSelectedTrackId] = useState(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [recap, setRecap] = useState(null);
+  const [error, setError] = useState("");
+  const [importError, setImportError] = useState("");
+  const [importing, setImporting] = useState(false);
+  const [shuffleOn, setShuffleOn] = useState(false);
+  const [queue, setQueue] = useState([]);
+  const [playlists, setPlaylists] = useState([]);
+  const [selectedPlaylistId, setSelectedPlaylistId] = useState(null);
+  const [newPlaylistName, setNewPlaylistName] = useState("");
+  const [creatingPlaylist, setCreatingPlaylist] = useState(false);
+  const [editingPlaylistId, setEditingPlaylistId] = useState(null);
+  const [editingPlaylistName, setEditingPlaylistName] = useState("");
+  const [playbackContext, setPlaybackContext] = useState({
+    type: "library",
+    id: null,
+    label: "Library",
+    shuffle: false,
+    trackIds: []
+  });
+  const [searchQuery, setSearchQuery] = useState("");
+  const [activeAlbum, setActiveAlbum] = useState(null);
+  const [activeArtist, setActiveArtist] = useState(null);
+  const [albumPlaylistId, setAlbumPlaylistId] = useState("");
+  const [artistPlaylistId, setArtistPlaylistId] = useState("");
+  const [sessionHistory, setSessionHistory] = useState([]);
+  const [lastSession, setLastSession] = useState(null);
+  const [sessionMode, setSessionMode] = useState("Normal");
+  const [settings, setSettings] = useState({
+    loudnessEnabled: true,
+    crossfadeEnabled: true,
+    gapSeconds: 1,
+    resumeOnLaunch: true,
+    stopEndsSession: true
+  });
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [repeatMode, setRepeatMode] = useState("off");
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [showRemaining, setShowRemaining] = useState(false);
+  const [isSeeking, setIsSeeking] = useState(false);
+  const [volume, setVolume] = useState(1);
+  const searchInputRef = useRef(null);
+  const navHistoryRef = useRef([]);
+  const navSkipRef = useRef(false);
+  const audioARef = useRef(null);
+  const audioBRef = useRef(null);
+  const activeAudioRef = useRef("A");
+  const isCrossfadingRef = useRef(false);
+  const lastPlayedTrackIdRef = useRef(null);
+  const shufflePlanRef = useRef({ list: [], index: -1, contextKey: "" });
+  const queueRef = useRef([]);
+  const lastNonQueueContextRef = useRef({
+    type: "library",
+    id: null,
+    label: "Library",
+    shuffle: false,
+    trackIds: []
+  });
+  const lastPlaybackRef = useRef({ context: null, trackId: null, position: 0 });
+  const persistTimerRef = useRef(0);
+  const pendingSeekRef = useRef(null);
+  const pendingNextRef = useRef(null);
+  const loudnessPendingRef = useRef(false);
+  const loudnessQueueRef = useRef([]);
+  const session = useSessionStats();
+  const sessionPlayCountsRef = useRef({});
+  const playStartRef = useRef(null);
+  const CROSSFADE_SECONDS = 1;
+  // Audio contract: one output path, deterministic gain chain, and explicit session boundaries.
+
+  const selectedIndex = useMemo(
+    () => tracks.findIndex((track) => track.id === selectedTrackId),
+    [tracks, selectedTrackId]
+  );
+  const selectedTrack = selectedIndex >= 0 ? tracks[selectedIndex] : null;
+
+  const ROTATION_EARN_THRESHOLD = 0.65;
+  const ROTATION_DECAY_WINDOW = 5;
+  const ROTATION_DECAY_SKIPS = 3;
+  const AUTOPLAY_WEIGHTS = {
+    rotation: 70,
+    recent: 20,
+    discovery: 10
+  };
+  const LONG_IGNORED_DAYS = 30;
+
+  function getActiveAudio() {
+    return activeAudioRef.current === "A" ? audioARef.current : audioBRef.current;
+  }
+
+  function getInactiveAudio() {
+    return activeAudioRef.current === "A" ? audioBRef.current : audioARef.current;
+  }
+
+  const scaleVolume = (gain) => Math.min(1, Math.max(0, gain * volume));
+
+  useEffect(() => {
+    queueRef.current = queue;
+  }, [queue]);
+
+  useEffect(() => {
+    if (GATE_DISABLED) return;
+    const token = localStorage.getItem("Hound.token");
+    const expiresAt = Number(localStorage.getItem("Hound.tokenExpires"));
+    if (!token || !Number.isFinite(expiresAt)) {
+      setAuthState({ status: "unauth", message: "" });
+      return;
+    }
+    if (Date.now() > expiresAt) {
+      localStorage.removeItem("Hound.token");
+      localStorage.removeItem("Hound.tokenExpires");
+      setAuthState({ status: "unauth", message: "Session expired." });
+      return;
+    }
+    setAuthState({ status: "authed", message: "" });
+    const deviceId = getDeviceId();
+    fetch(CHECKIN_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: SUPABASE_ANON,
+        Authorization: `Bearer ${SUPABASE_ANON}`
+      },
+      body: JSON.stringify({ token, deviceId })
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (!data || !data.ok) {
+          if (data?.forceGate) {
+            setAuthState({ status: "revoked", message: data?.error || "Access revoked." });
+          }
+          return;
+        }
+        if (data.wipeOnNextLaunch) {
+          clearHoundStorage();
+          setAuthState({ status: "unauth", message: "Device reset required." });
+        }
+      })
+      .catch(() => {
+        // keep session if network blips
+      });
+  }, []);
+
+  useEffect(() => {
+    setTracks((prev) => {
+      let changed = false;
+      const next = prev.map((track) => {
+        const normalized = normalizeTrack(track);
+        if (normalized !== track) changed = true;
+        return normalized;
+      });
+      return changed ? next : prev;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (navSkipRef.current) {
+      navSkipRef.current = false;
+      return;
+    }
+    const history = navHistoryRef.current;
+    if (history.length === 0 || history[history.length - 1] !== screen) {
+      history.push(screen);
+    }
+  }, [screen]);
+
+  useEffect(() => {
+    if (screen !== "search") return;
+    if (searchInputRef.current) {
+      searchInputRef.current.focus();
+    }
+  }, [screen]);
+
+  useEffect(() => {
+    const closeMenus = () => {
+      setRotationMenu(null);
+      setContextMenu(null);
+    };
+    window.addEventListener("click", closeMenus);
+    return () => window.removeEventListener("click", closeMenus);
+  }, []);
+
+  useEffect(() => {
+    if (GATE_DISABLED) return;
+    if (authState.status !== "authed") return;
+    let stopped = false;
+    const poll = () => {
+      const token = localStorage.getItem("Hound.token");
+      const deviceId = getDeviceId();
+      if (!token) return;
+      fetch(CHECKIN_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          apikey: SUPABASE_ANON,
+          Authorization: `Bearer ${SUPABASE_ANON}`
+        },
+        body: JSON.stringify({ token, deviceId })
+      })
+        .then((res) => res.json())
+        .then((data) => {
+          if (stopped) return;
+          if (!data || !data.ok) {
+            if (data?.forceGate) {
+              setAuthState({ status: "revoked", message: data?.error || "Access revoked." });
+            }
+            return;
+          }
+          if (data.wipeOnNextLaunch) {
+            clearHoundStorage();
+            setAuthState({ status: "unauth", message: "Device reset required." });
+          }
+        })
+        .catch(() => {
+          // keep session if network blips
+        });
+    };
+    const interval = setInterval(poll, 15000);
+    return () => {
+      stopped = true;
+      clearInterval(interval);
+    };
+  }, [authState.status]);
+
+  useEffect(() => {
+    try {
+      const savedSettings = localStorage.getItem("Hound.settings");
+      if (savedSettings) {
+        const parsed = JSON.parse(savedSettings);
+        if (parsed && typeof parsed === "object") {
+          setSettings((prev) => ({ ...prev, ...parsed }));
+        }
+      }
+      const savedHistory = localStorage.getItem("Hound.sessionHistory");
+      if (savedHistory) {
+        const parsedHistory = JSON.parse(savedHistory);
+        if (Array.isArray(parsedHistory)) {
+          setSessionHistory(parsedHistory);
+        }
+      }
+      const savedLast = localStorage.getItem("Hound.lastSession");
+      if (savedLast) {
+        const parsedLast = JSON.parse(savedLast);
+        if (parsedLast && typeof parsedLast === "object") {
+          setLastSession(parsedLast);
+          if (parsedLast.mode) {
+            setSessionMode(parsedLast.mode);
+          }
+        }
+      }
+    } catch {
+      // ignore storage errors
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("Hound.settings", JSON.stringify(settings));
+    } catch {
+      // ignore storage errors
+    }
+  }, [settings]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("Hound.sessionHistory", JSON.stringify(sessionHistory));
+    } catch {
+      // ignore storage errors
+    }
+  }, [sessionHistory]);
+
+  useEffect(() => {
+    if (!lastSession) return;
+    try {
+      localStorage.setItem("Hound.lastSession", JSON.stringify(lastSession));
+    } catch {
+      // ignore storage errors
+    }
+  }, [lastSession]);
+  useEffect(() => {
+    if (!settings.resumeOnLaunch) return;
+    if (!selectedTrackId || !playbackContext) return;
+    lastPlaybackRef.current = {
+      context: playbackContext,
+      trackId: selectedTrackId,
+      position: currentTime
+    };
+    if (persistTimerRef.current) {
+      clearTimeout(persistTimerRef.current);
+    }
+    persistTimerRef.current = setTimeout(() => {
+      try {
+        localStorage.setItem("Hound.lastPlayback", JSON.stringify(lastPlaybackRef.current));
+      } catch {
+        // ignore
+      }
+    }, 250);
+  }, [settings.resumeOnLaunch, selectedTrackId, playbackContext, currentTime]);
+
+  useEffect(() => {
+    if (!settings.resumeOnLaunch) return;
+    try {
+      const stored = localStorage.getItem("Hound.lastPlayback");
+      if (!stored) return;
+      const parsed = JSON.parse(stored);
+      if (!parsed || !parsed.trackId || !parsed.context) return;
+      setContext(parsed.context);
+      setSelectedTrackId(parsed.trackId);
+      pendingSeekRef.current = Number(parsed.position) || 0;
+    } catch {
+      // ignore
+    }
+  }, [settings.resumeOnLaunch]);
+
+  useEffect(() => {
+    if (!settings.loudnessEnabled) {
+      loudnessQueueRef.current = [];
+      return;
+    }
+    loudnessQueueRef.current = tracks
+      .filter((track) => !track.loudnessReady)
+      .map((track) => track.id);
+  }, [tracks, settings.loudnessEnabled]);
+
+  useEffect(() => {
+    if (loudnessPendingRef.current) return;
+    if (!settings.loudnessEnabled) return;
+    const nextId = loudnessQueueRef.current[0];
+    if (!nextId) return;
+    const track = tracks.find((item) => item.id === nextId);
+    const analyze = window?.Hound?.analyzeLoudness;
+    if (!track || typeof analyze !== "function") return;
+    loudnessPendingRef.current = true;
+    analyze(track.path)
+      .then((result) => {
+        if (!result || typeof result.gainDb !== "number") {
+          return { gainDb: 0 };
+        }
+        return result;
+      })
+      .then((result) => {
+        const gainLinear = Math.pow(10, result.gainDb / 20);
+        setTracks((prev) =>
+          prev.map((item) =>
+            item.id === track.id
+              ? { ...item, gain: gainLinear, loudnessReady: true }
+              : item
+          )
+        );
+      })
+      .finally(() => {
+        loudnessPendingRef.current = false;
+        loudnessQueueRef.current = loudnessQueueRef.current.filter((id) => id !== nextId);
+      });
+  }, [tracks, settings.loudnessEnabled]);
+
+  useEffect(() => {
+    if (!settings.loudnessEnabled) {
+      setTracks((prev) =>
+        prev.map((track) => ({ ...track, gain: 1, loudnessReady: true }))
+      );
+    }
+  }, [settings.loudnessEnabled]);
+
+  useEffect(() => {
+    const audio = getActiveAudio();
+    if (!audio || !selectedTrack) return;
+    const baseVolume =
+      settings.loudnessEnabled && Number.isFinite(selectedTrack.gain)
+        ? selectedTrack.gain
+        : 1;
+    audio.volume = scaleVolume(baseVolume);
+  }, [volume, selectedTrack, settings.loudnessEnabled]);
+
+  useEffect(() => {
+    if (!settings.resumeOnLaunch) return;
+    if (!lastSession || !lastSession.lastTrackId) return;
+    if (selectedTrackId) return;
+    const exists = tracks.some((track) => track.id === lastSession.lastTrackId);
+    if (exists) {
+      setSelectedTrackId(lastSession.lastTrackId);
+    }
+  }, [lastSession, settings.resumeOnLaunch, tracks, selectedTrackId]);
+
+  const stopAllAudio = () => {
+    if (pendingNextRef.current) {
+      clearTimeout(pendingNextRef.current);
+      pendingNextRef.current = null;
+    }
+    [audioARef.current, audioBRef.current].forEach((audio) => {
+      if (!audio) return;
+      audio.pause();
+      audio.currentTime = 0;
+      audio.removeAttribute("src");
+      audio.load();
+    });
+  };
+
+  const fadeAudio = (audio, from, to, durationMs, onDone) => {
+    if (!audio) {
+      if (onDone) onDone();
+      return;
+    }
+    const start = performance.now();
+    const tick = (now) => {
+      const elapsed = now - start;
+      const progress = Math.min(elapsed / durationMs, 1);
+      audio.volume = from + (to - from) * progress;
+      if (progress < 1) {
+        requestAnimationFrame(tick);
+      } else if (onDone) {
+        onDone();
+      }
+    };
+    requestAnimationFrame(tick);
+  };
+
+  useEffect(() => {
+    const onError = () => {
+      setError("Could not play this file.");
+      setIsPlaying(false);
+    };
+    const onLoadedMetadata = (event) => {
+      const audio = event.currentTarget;
+      if (getActiveAudio() !== audio) return;
+      setDuration(Number.isFinite(audio.duration) ? audio.duration : 0);
+      if (pendingSeekRef.current !== null) {
+        const seekTo = Math.max(0, Number(pendingSeekRef.current) || 0);
+        audio.currentTime = seekTo;
+        setCurrentTime(seekTo);
+        pendingSeekRef.current = null;
+      }
+    };
+    const onTimeUpdate = (event) => {
+      const audio = event.currentTarget;
+      if (getActiveAudio() !== audio) return;
+      if (!session.sessionActiveRef.current || !isPlaying) return;
+      const currentTime = Number.isFinite(audio.currentTime) ? audio.currentTime : 0;
+      const delta = currentTime - session.lastTimeRef.current;
+      session.addListenedDelta(delta);
+      session.lastTimeRef.current = currentTime;
+      if (!isSeeking) {
+        setCurrentTime(currentTime);
+      }
+    };
+  const onEnded = (event) => {
+    const audio = event.currentTarget;
+    if (getActiveAudio() !== audio) return;
+    if (queueRef.current.length > 0) {
+      handleNext({ fromEnded: true });
+      return;
+    }
+    handleNext({ fromEnded: true });
+  };
+    const audios = [audioARef.current, audioBRef.current].filter(Boolean);
+    audios.forEach((audio) => {
+      audio.addEventListener("error", onError);
+      audio.addEventListener("loadedmetadata", onLoadedMetadata);
+      audio.addEventListener("timeupdate", onTimeUpdate);
+      audio.addEventListener("ended", onEnded);
+    });
+    return () => {
+      audios.forEach((audio) => {
+        audio.removeEventListener("error", onError);
+        audio.removeEventListener("loadedmetadata", onLoadedMetadata);
+        audio.removeEventListener("timeupdate", onTimeUpdate);
+        audio.removeEventListener("ended", onEnded);
+      });
+    };
+  }, [
+    isPlaying,
+    session,
+    isSeeking,
+    selectedIndex,
+    tracks.length,
+    settings.crossfadeEnabled,
+    settings.gapSeconds
+  ]);
+
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      const activeTag = document.activeElement?.tagName ?? "";
+      if (activeTag === "TEXTAREA") return;
+      if (activeTag === "INPUT") {
+        const inputType = document.activeElement?.getAttribute("type") || "text";
+        if (inputType === "text" || inputType === "search" || inputType === "password") {
+          return;
+        }
+      }
+      if (event.code === "Space") {
+        event.preventDefault();
+        togglePlayPause();
+        return;
+      }
+      if (event.ctrlKey && event.code === "KeyB") {
+        event.preventDefault();
+        setSidebarOpen((prev) => !prev);
+        return;
+      }
+      if (event.ctrlKey && event.code === "Digit1") {
+        event.preventDefault();
+        setScreen("home");
+        return;
+      }
+      if (event.ctrlKey && event.code === "Digit2") {
+        event.preventDefault();
+        setScreen("library");
+        return;
+      }
+      if (event.ctrlKey && event.code === "Digit3") {
+        event.preventDefault();
+        setScreen("search");
+        return;
+      }
+      if (event.ctrlKey && event.code === "Digit4") {
+        event.preventDefault();
+        setScreen("playlist");
+        return;
+      }
+      if (event.ctrlKey && event.code === "Digit5") {
+        event.preventDefault();
+        setScreen("settings");
+        return;
+      }
+      if (event.code === "ArrowLeft") {
+        event.preventDefault();
+        handlePrev();
+        return;
+      }
+      if (event.code === "ArrowRight") {
+        event.preventDefault();
+        handleNext({ manual: true });
+        return;
+      }
+      if (event.altKey && event.code === "ArrowLeft") {
+        event.preventDefault();
+        goBack();
+        return;
+      }
+      if (event.code === "KeyS") {
+        event.preventDefault();
+        handleStop();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  });
+
+
+  const loadAndPlay = (track) => {
+    if (!track) return;
+    if (pendingNextRef.current) {
+      clearTimeout(pendingNextRef.current);
+      pendingNextRef.current = null;
+    }
+    const audio = getActiveAudio();
+    if (!audio) return;
+    const normalized = track.path.replace(/\\/g, "/");
+    const prefixed = normalized.startsWith("/") ? normalized : `/${normalized}`;
+    const src = `Houndfile://${encodeURI(prefixed)}`;
+    stopAllAudio();
+    // Signal chain: per-track LUFS gain -> session envelope (crossfade) -> app volume (unity).
+    const baseVolume = settings.loudnessEnabled && Number.isFinite(track.gain) ? track.gain : 1;
+    const safeVolume = scaleVolume(baseVolume);
+    audio.volume = safeVolume;
+    audio.src = src;
+    audio.load();
+    setCurrentTime(0);
+    setError("");
+    session.startSessionIfNeeded();
+    session.markTrackPlayed();
+    lastPlayedTrackIdRef.current = track.id;
+    sessionPlayCountsRef.current[track.id] =
+      (sessionPlayCountsRef.current[track.id] || 0) + 1;
+    playStartRef.current = {
+      trackId: track.id,
+      play_start_time: new Date().toISOString()
+    };
+    setLastSession((prev) => ({
+      ...prev,
+      lastTrackId: track.id,
+      queue: queueRef.current,
+      mode: sessionMode
+    }));
+    audio
+      .play()
+      .then(() => {
+        setIsPlaying(true);
+      })
+      .catch(() => {
+        setError("Could not play this file.");
+        setIsPlaying(false);
+      });
+  };
+
+  const startCrossfade = (nextIndex) => {
+    if (isCrossfadingRef.current) return;
+    if (nextIndex < 0 || nextIndex >= tracks.length) return;
+    const currentAudio = getActiveAudio();
+    const nextAudio = getInactiveAudio();
+    if (!currentAudio || !nextAudio) return;
+    const nextTrack = tracks[nextIndex];
+    const nextGainRaw =
+      settings.loudnessEnabled && Number.isFinite(nextTrack.gain) ? nextTrack.gain : 1;
+    const nextGain = scaleVolume(nextGainRaw);
+    const normalized = nextTrack.path.replace(/\\/g, "/");
+    const prefixed = normalized.startsWith("/") ? normalized : `/${normalized}`;
+    const src = `Houndfile://${encodeURI(prefixed)}`;
+    isCrossfadingRef.current = true;
+    nextAudio.pause();
+    nextAudio.currentTime = 0;
+    nextAudio.volume = 0;
+    nextAudio.src = src;
+    nextAudio.load();
+    session.startSessionIfNeeded();
+    session.markTrackPlayed();
+    sessionPlayCountsRef.current[nextTrack.id] =
+      (sessionPlayCountsRef.current[nextTrack.id] || 0) + 1;
+    playStartRef.current = {
+      trackId: nextTrack.id,
+      play_start_time: new Date().toISOString()
+    };
+    nextAudio
+      .play()
+      .then(() => {
+        // Crossfade envelope must not exceed unity gain.
+        fadeAudio(nextAudio, 0, nextGain, CROSSFADE_SECONDS * 1000);
+        fadeAudio(currentAudio, currentAudio.volume, 0, CROSSFADE_SECONDS * 1000, () => {
+          currentAudio.pause();
+          currentAudio.currentTime = 0;
+          activeAudioRef.current = activeAudioRef.current === "A" ? "B" : "A";
+          setSelectedTrackId(nextTrack.id);
+          setIsPlaying(true);
+          setShowBack(false);
+          setDuration(Number.isFinite(nextAudio.duration) ? nextAudio.duration : 0);
+          setCurrentTime(0);
+          isCrossfadingRef.current = false;
+        });
+      })
+      .catch(() => {
+        setError("Could not play this file.");
+        setIsPlaying(false);
+        isCrossfadingRef.current = false;
+      });
+  };
+
+  const popQueueTrackId = () => {
+    const currentQueue = queueRef.current;
+    if (!Array.isArray(currentQueue) || currentQueue.length === 0) return null;
+    let nextId = null;
+    const remaining = [...currentQueue];
+    while (remaining.length > 0) {
+      const candidate = remaining.shift();
+      const exists = tracks.some((track) => track.id === candidate);
+      if (exists) {
+        nextId = candidate;
+        break;
+      }
+    }
+    queueRef.current = remaining;
+    setQueue(remaining);
+    return nextId;
+  };
+
+  const togglePlayPause = () => {
+    const audio = getActiveAudio();
+    if (!selectedTrack || !audio) return;
+    if (isPlaying) {
+      audio.pause();
+      setIsPlaying(false);
+      return;
+    }
+    const resumeGain =
+      settings.loudnessEnabled && Number.isFinite(selectedTrack.gain)
+        ? selectedTrack.gain
+        : audio.volume;
+    audio.volume = scaleVolume(resumeGain);
+    session.startSessionIfNeeded();
+    if (lastPlayedTrackIdRef.current !== selectedTrack.id) {
+      session.markTrackPlayed();
+      lastPlayedTrackIdRef.current = selectedTrack.id;
+      audio.currentTime = 0;
+      sessionPlayCountsRef.current[selectedTrack.id] =
+        (sessionPlayCountsRef.current[selectedTrack.id] || 0) + 1;
+      playStartRef.current = {
+        trackId: selectedTrack.id,
+        play_start_time: new Date().toISOString()
+      };
+    }
+    audio
+      .play()
+      .then(() => setIsPlaying(true))
+      .catch(() => {
+        setError("Could not play this file.");
+        setIsPlaying(false);
+      });
+  };
+
+  const goToTrack = (index, options = {}) => {
+    if (index < 0 || index >= tracks.length) return;
+    const { openPlayer = false } = options;
+    if (selectedTrack && tracks[index].id !== selectedTrack.id) {
+      finalizePlay({ manualSkip: true, autoAdvance: false });
+    }
+    setSelectedTrackId(tracks[index].id);
+    if (openPlayer) {
+      setScreen("player");
+    }
+    loadAndPlay(tracks[index]);
+  };
+
+  const handlePrev = () => {
+    if (!selectedTrack || !getActiveAudio()) return;
+    if (pendingNextRef.current) {
+      clearTimeout(pendingNextRef.current);
+      pendingNextRef.current = null;
+    }
+    finalizePlay({ manualSkip: true, autoAdvance: false });
+    const audio = getActiveAudio();
+    const effectiveContext = getEffectiveContext();
+    const ids = getContextTrackIds(effectiveContext);
+    const currentIdx = ids.indexOf(selectedTrack.id);
+    const useShuffle = effectiveContext.shuffle || (effectiveContext.type === "library" && shuffleOn);
+    if (useShuffle) {
+      const plan = ensureShufflePlan(effectiveContext, selectedTrack.id);
+      if (plan.index > 0) {
+        plan.index -= 1;
+        const prevId = plan.list[plan.index];
+        const prevIndex = tracks.findIndex((track) => track.id === prevId);
+        if (prevIndex >= 0) {
+          goToTrack(prevIndex);
+          return;
+        }
+      }
+      if (repeatMode === "all" && plan.list.length > 1) {
+        plan.index = plan.list.length - 1;
+        const lastId = plan.list[plan.index];
+        const lastIndex = tracks.findIndex((track) => track.id === lastId);
+        if (lastIndex >= 0) {
+          goToTrack(lastIndex);
+          return;
+        }
+      }
+      audio.currentTime = 0;
+      audio
+        .play()
+        .then(() => setIsPlaying(true))
+        .catch(() => {
+          setError("Could not play this file.");
+          setIsPlaying(false);
+        });
+      return;
+    }
+    if (currentIdx > 0) {
+      goToContextIndex(ids, currentIdx - 1);
+      return;
+    }
+    if (repeatMode === "all" && ids.length > 0) {
+      goToContextIndex(ids, ids.length - 1);
+      return;
+    }
+    audio.currentTime = 0;
+    audio
+      .play()
+      .then(() => setIsPlaying(true))
+      .catch(() => {
+        setError("Could not play this file.");
+        setIsPlaying(false);
+      });
+  };
+
+  const buildContext = (base) => {
+    if (!base || typeof base !== "object") {
+      return {
+        type: "library",
+        id: null,
+        label: "Library",
+        shuffle: false,
+        trackIds: tracks.map((track) => track.id)
+      };
+    }
+    const label = base.label || (base.type === "playlist" && base.name
+      ? `Playlist: ${base.name}`
+      : base.type === "album" && base.name
+        ? `Album: ${base.name}`
+        : base.type === "artist" && base.name
+          ? `Artist: ${base.name}`
+          : base.type === "search"
+            ? "Search"
+            : base.type === "queue"
+              ? "Queue"
+              : "Library");
+    return {
+      type: base.type || "library",
+      id: base.id || null,
+      label,
+      shuffle: !!base.shuffle,
+      trackIds: Array.isArray(base.trackIds) && base.trackIds.length > 0
+        ? base.trackIds
+        : tracks.map((track) => track.id)
+    };
+  };
+
+  const setContext = (nextContext) => {
+    const context = buildContext(nextContext);
+    const returningFromQueue = playbackContext.type === "queue" && context.type !== "queue";
+    if (context.type !== "queue") {
+      lastNonQueueContextRef.current = context;
+    }
+    if (!returningFromQueue && context.type !== "queue") {
+      shufflePlanRef.current = { list: [], index: -1, contextKey: "" };
+    }
+    setPlaybackContext(context);
+  };
+
+  const getContextTrackIds = (context) => {
+    if (!context || typeof context !== "object") return tracks.map((t) => t.id);
+    if (context.type === "playlist" && context.id) {
+      const playlist = playlists.find((item) => item.id === context.id);
+      if (playlist) return playlist.trackIds;
+    }
+    return context.trackIds && context.trackIds.length > 0
+      ? context.trackIds
+      : tracks.map((t) => t.id);
+  };
+
+  const buildShufflePlan = (ids, currentId) => {
+    if (!Array.isArray(ids) || ids.length === 0) return [];
+    const remaining = currentId ? ids.filter((id) => id !== currentId) : [...ids];
+    for (let i = remaining.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [remaining[i], remaining[j]] = [remaining[j], remaining[i]];
+    }
+    return currentId ? [currentId, ...remaining] : remaining;
+  };
+
+  const ensureShufflePlan = (context, currentId) => {
+    const ids = getContextTrackIds(context);
+    const key = `${context.type || "library"}:${context.id || ""}:${ids.join(",")}`;
+    const plan = shufflePlanRef.current;
+    const hasCurrent = currentId ? plan.list.includes(currentId) : plan.list.length > 0;
+    if (plan.contextKey !== key || !hasCurrent) {
+      const list = buildShufflePlan(ids, currentId);
+      const index = currentId ? list.indexOf(currentId) : 0;
+      shufflePlanRef.current = { list, index, contextKey: key };
+      return shufflePlanRef.current;
+    }
+    if (currentId && plan.index === -1) {
+      plan.index = plan.list.indexOf(currentId);
+    }
+    return plan;
+  };
+
+  const getEffectiveContext = () =>
+    playbackContext.type === "queue" ? lastNonQueueContextRef.current : playbackContext;
+
+  const isAutoplayEnabled = () => repeatMode !== "off" || shuffleOn;
+
+  const selectNextTrack = ({ currentTrack, library, playbackContext: context }) => {
+    const now = Date.now();
+    const orbitBuckets = { rotation: [], recent: [], discovery: [] };
+    const meaningfulThreshold = ROTATION_EARN_THRESHOLD;
+    const effectiveContext = context || playbackContext;
+
+    const inRotation = (track) =>
+      track.rotationOverride === "force_on" || track.rotation === true;
+
+    const inRecent = (track) => {
+      const lastPlay = track.playHistory?.[0];
+      if (!lastPlay) return false;
+      return lastPlay.percent_listened >= meaningfulThreshold && !lastPlay.skipped_early;
+    };
+
+    const isLongIgnored = (track) => {
+      if (track.rotationOverride === "force_on") return false;
+      if (track.saved) return false;
+      if (inRotation(track) || inRecent(track)) return false;
+      const lastPositive = track.lastPositiveListenAt
+        ? Date.parse(track.lastPositiveListenAt)
+        : null;
+      const cutoffMs = LONG_IGNORED_DAYS * 24 * 60 * 60 * 1000;
+      if (Number.isFinite(lastPositive)) {
+        return now - lastPositive >= cutoffMs;
+      }
+      if ((track.playCountTotal || 0) > 0) {
+        const history = Array.isArray(track.playHistory) ? track.playHistory : [];
+        const oldest = history[history.length - 1];
+        const firstPlay = oldest?.play_start_time ? Date.parse(oldest.play_start_time) : null;
+        if (Number.isFinite(firstPlay)) {
+          return now - firstPlay >= cutoffMs;
+        }
+      }
+      return false;
+    };
+
+    const inDiscovery = (track) => {
+      if (inRotation(track) || inRecent(track)) return false;
+      if ((track.playCountTotal || 0) === 0) return true;
+      return isLongIgnored(track);
+    };
+
+    const candidates = Array.isArray(library) ? library : [];
+    candidates.forEach((track) => {
+      if (!track || track.id === currentTrack?.id) return;
+      if (track.rotationOverride === "force_off") return;
+      if (inRotation(track)) {
+        orbitBuckets.rotation.push(track);
+      } else if (inRecent(track)) {
+        orbitBuckets.recent.push(track);
+      } else if (inDiscovery(track)) {
+        orbitBuckets.discovery.push(track);
+      }
+    });
+
+    const availableOrbits = Object.entries(orbitBuckets).filter(([, items]) => items.length > 0);
+    if (availableOrbits.length === 0) return null;
+
+    const totalWeight = availableOrbits.reduce(
+      (sum, [key]) => sum + (AUTOPLAY_WEIGHTS[key] || 0),
+      0
+    );
+    let pick = Math.random() * totalWeight;
+    let chosenOrbit = availableOrbits[0][0];
+    for (const [key] of availableOrbits) {
+      pick -= AUTOPLAY_WEIGHTS[key] || 0;
+      if (pick <= 0) {
+        chosenOrbit = key;
+        break;
+      }
+    }
+
+    const bucket = orbitBuckets[chosenOrbit];
+    if (bucket.length === 1) return bucket[0];
+
+    const scored = bucket.map((track) => {
+      let score = 0;
+      if (chosenOrbit === "rotation") {
+        score = Number.isFinite(track.rotationScore) ? track.rotationScore : 0;
+      } else if (chosenOrbit === "recent") {
+        score = track.playHistory?.[0]?.percent_listened || 0;
+      }
+      return { track, score };
+    });
+
+    const maxScore = Math.max(...scored.map((entry) => entry.score));
+    const top = scored.filter((entry) => entry.score === maxScore).map((entry) => entry.track);
+    const savedTop = top.filter((track) => track.saved);
+    const pool = savedTop.length > 0 ? savedTop : top;
+    return pool[Math.floor(Math.random() * pool.length)];
+  };
+
+  const goBack = () => {
+    const history = navHistoryRef.current;
+    if (history.length <= 1) return;
+    history.pop();
+    const prev = history[history.length - 1];
+    navSkipRef.current = true;
+    setScreen(prev);
+  };
+
+  const appendPlayTelemetry = (trackId, telemetry) => {
+    setTracks((prev) =>
+      prev.map((track) => {
+        if (track.id !== trackId) return track;
+        const history = Array.isArray(track.playHistory) ? track.playHistory : [];
+        const nextHistory = [telemetry, ...history].slice(0, 20);
+        return { ...track, playHistory: nextHistory };
+      })
+    );
+  };
+
+  const applyRotationRules = (trackId, telemetry) => {
+    setTracks((prev) =>
+      prev.map((track) => {
+        if (track.id !== trackId) return track;
+        const rotationOverride = track.rotationOverride ?? "none";
+        const nextPlayCount = (Number.isFinite(track.playCountTotal) ? track.playCountTotal : 0) + 1;
+        const history = Array.isArray(track.playHistory) ? track.playHistory : [];
+        const recent = [telemetry, ...history].slice(0, ROTATION_DECAY_WINDOW);
+        const recentEarlySkips = recent.filter((entry) => entry.skipped_early).length;
+        let rotationScore = Number.isFinite(track.rotationScore) ? track.rotationScore : 0;
+        let positiveDelta = 0;
+        let negativeDelta = 0;
+        if (!telemetry.skipped_early && telemetry.percent_listened >= ROTATION_EARN_THRESHOLD) {
+          positiveDelta += 20;
+        }
+        if (telemetry.completed_play) {
+          positiveDelta += 10;
+        }
+        if (telemetry.replayed_same_session > 0) {
+          positiveDelta += 10;
+        }
+        if (telemetry.skipped_early) {
+          negativeDelta -= 30;
+        } else if (telemetry.manual_skip && telemetry.percent_listened < 0.3) {
+          negativeDelta -= 15;
+        }
+        rotationScore = Math.min(100, Math.max(0, rotationScore + positiveDelta + negativeDelta));
+        let rotation = !!track.rotation;
+        if (rotationOverride === "force_on") {
+          rotation = true;
+        } else if (rotationOverride === "force_off") {
+          rotation = false;
+        } else if (nextPlayCount >= 2) {
+          if (rotationScore >= 60) {
+            rotation = true;
+          }
+          if (rotationScore <= 35) {
+            rotation = false;
+          }
+        }
+        if (rotation && rotationOverride === "none" && recentEarlySkips >= ROTATION_DECAY_SKIPS) {
+          rotation = false;
+        }
+        return {
+          ...track,
+          rotation,
+          rotationScore,
+          lastPositiveListenAt: positiveDelta > 0 ? telemetry.play_end_time : track.lastPositiveListenAt ?? null,
+          lastNegativeListenAt: negativeDelta < 0 ? telemetry.play_end_time : track.lastNegativeListenAt ?? null,
+          rotationOverride,
+          playCountTotal: nextPlayCount
+        };
+      })
+    );
+  };
+
+  const finalizePlay = ({ manualSkip, autoAdvance }) => {
+    if (!selectedTrack) return;
+    const start = playStartRef.current;
+    if (!start || start.trackId !== selectedTrack.id) return;
+    const endTime = new Date().toISOString();
+    const totalDuration = Number.isFinite(duration) ? duration : 0;
+    const listenedSeconds = Math.max(0, Number(currentTime) || 0);
+    const percent = totalDuration > 0 ? Math.min(listenedSeconds / totalDuration, 1) : 0;
+    const completed = percent >= 0.98 || (autoAdvance && percent >= 0.9);
+    const skippedEarly = !!manualSkip && percent < ROTATION_EARN_THRESHOLD;
+    const count = sessionPlayCountsRef.current[selectedTrack.id] || 1;
+    const telemetry = {
+      play_start_time: start.play_start_time,
+      play_end_time: endTime,
+      play_duration_seconds: Number(listenedSeconds.toFixed(1)),
+      track_total_duration: Number(totalDuration.toFixed(1)),
+      percent_listened: Number(percent.toFixed(3)),
+      skipped_early: skippedEarly,
+      replayed_same_session: Math.max(0, count - 1),
+      completed_play: completed,
+      manual_skip: !!manualSkip,
+      auto_advance: !!autoAdvance,
+      timestamp: start.play_start_time
+    };
+    appendPlayTelemetry(selectedTrack.id, telemetry);
+    applyRotationRules(selectedTrack.id, telemetry);
+    playStartRef.current = null;
+  };
+
+  const goToContextIndex = (ids, index) => {
+    if (!Array.isArray(ids) || ids.length === 0) return false;
+    if (index < 0 || index >= ids.length) return false;
+    const id = ids[index];
+    const trackIndex = tracks.findIndex((track) => track.id === id);
+    if (trackIndex >= 0) {
+      goToTrack(trackIndex);
+      return true;
+    }
+    return false;
+  };
+
+  const getNextInContext = () => {
+    const effectiveContext = getEffectiveContext();
+    const ids = getContextTrackIds(effectiveContext);
+    const currentIdx = ids.indexOf(selectedTrack?.id);
+    const useShuffle = effectiveContext.shuffle || (effectiveContext.type === "library" && shuffleOn);
+    if (useShuffle && ids.length > 1) {
+      const plan = ensureShufflePlan(effectiveContext, selectedTrack?.id);
+      if (plan.index < plan.list.length - 1) {
+        plan.index += 1;
+        return plan.list[plan.index] || null;
+      }
+      if (repeatMode === "all") {
+        shufflePlanRef.current = { list: [], index: -1, contextKey: "" };
+        const refreshed = ensureShufflePlan(effectiveContext, selectedTrack?.id);
+        if (refreshed.list.length > 0) {
+          refreshed.index = 0;
+          return refreshed.list[0] || null;
+        }
+      }
+      return null;
+    }
+    if (currentIdx >= 0 && currentIdx < ids.length - 1) {
+      return ids[currentIdx + 1];
+    }
+    if (repeatMode === "all" && ids.length > 0) {
+      return ids[0];
+    }
+    return null;
+  };
+
+  const handleNext = (options = {}) => {
+    if (!selectedTrack || !getActiveAudio()) return;
+    if (pendingNextRef.current) {
+      clearTimeout(pendingNextRef.current);
+      pendingNextRef.current = null;
+    }
+    const { fromEnded = false, manual = false } = options;
+    const audio = getActiveAudio();
+    if (!fromEnded && audio.currentTime < 30) {
+      session.markSkip();
+    }
+    finalizePlay({ manualSkip: !fromEnded, autoAdvance: fromEnded });
+    const queuedId = popQueueTrackId();
+    if (queuedId) {
+      const queuedIndex = tracks.findIndex((track) => track.id === queuedId);
+      if (queuedIndex >= 0) {
+        setContext({ type: "queue", label: "Queue" });
+        goToTrack(queuedIndex);
+        return;
+      }
+    }
+    if (repeatMode === "one" && selectedTrack) {
+      audio.currentTime = 0;
+      audio
+        .play()
+        .then(() => setIsPlaying(true))
+        .catch(() => {
+          setError("Could not play this file.");
+          setIsPlaying(false);
+        });
+      return;
+    }
+    if (playbackContext.type === "queue" && queueRef.current.length === 0) {
+      setContext(lastNonQueueContextRef.current);
+    }
+    if (fromEnded && !isAutoplayEnabled()) {
+      audio.pause();
+      audio.currentTime = 0;
+      setIsPlaying(false);
+      return;
+    }
+    if (isAutoplayEnabled()) {
+      const nextTrack = selectNextTrack({
+        currentTrack: selectedTrack,
+        library: tracks,
+        playbackContext
+      });
+      if (nextTrack) {
+        const nextIndex = tracks.findIndex((track) => track.id === nextTrack.id);
+        if (nextIndex >= 0) {
+          goToTrack(nextIndex);
+          return;
+        }
+      }
+    }
+    if (manual) {
+      const nextId = getNextInContext();
+      if (nextId) {
+        const nextIndex = tracks.findIndex((track) => track.id === nextId);
+        if (nextIndex >= 0) {
+          goToTrack(nextIndex);
+          return;
+        }
+      }
+    }
+    audio.pause();
+    audio.currentTime = 0;
+    setIsPlaying(false);
+  };
+
+  const handleStop = () => {
+    if (pendingNextRef.current) {
+      clearTimeout(pendingNextRef.current);
+      pendingNextRef.current = null;
+    }
+    finalizePlay({ manualSkip: true, autoAdvance: false });
+    stopAllAudio();
+    setCurrentTime(0);
+    setIsPlaying(false);
+    if (settings.stopEndsSession) {
+      const payload = session.endSession();
+      setRecap(payload);
+      sessionPlayCountsRef.current = {};
+      const historyEntry = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        date: new Date().toISOString(),
+        mode: sessionMode,
+        payload
+      };
+      setSessionHistory((prev) => [historyEntry, ...prev]);
+      setLastSession((prev) => ({
+        ...prev,
+        lastTrackId: selectedTrackId,
+        queue: queueRef.current,
+        mode: sessionMode
+      }));
+    }
+  };
+
+  const handleImport = async () => {
+    if (importing) return;
+    setImporting(true);
+    try {
+      const openAudioFiles = window?.Hound?.openAudioFiles;
+      if (typeof openAudioFiles !== "function") {
+        console.warn("[Hound] window.Hound.openAudioFiles is unavailable.");
+        setImportError("Import is unavailable in this mode. Use the Electron app.");
+        return;
+      }
+      const result = await openAudioFiles();
+      if (!Array.isArray(result) || result.length === 0) return;
+      setImportError("");
+      setTracks((prev) => {
+        const existing = new Set(prev.map((track) => track.path));
+        const additions = result
+          .filter((path) => typeof path === "string" && path.trim().length > 0)
+          .filter((path) => !existing.has(path))
+          .map((path) => {
+            const { title, artist } = parseTrackMeta(path);
+            return {
+              id: path,
+              path,
+              title,
+              artist,
+              rotation: false,
+              rotationManual: null,
+              saved: false,
+              rotationScore: 0,
+              lastPositiveListenAt: null,
+              lastNegativeListenAt: null,
+              rotationOverride: "none",
+              playCountTotal: 0,
+              playHistory: [],
+              gain: 1,
+              loudnessReady: false
+            };
+          });
+        const next = [...prev, ...additions];
+        if (selectedTrackId === null && additions.length > 0) {
+          setSelectedTrackId(additions[0].id);
+        }
+        return next;
+      });
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const redeemInvite = async () => {
+    if (authBusy) return;
+    const code = inviteCode.trim();
+    if (!code) {
+      setAuthError("Invite code required.");
+      return;
+    }
+    setAuthBusy(true);
+    setAuthError("");
+    try {
+      const deviceId = getDeviceId();
+      const label = inviteLabel.trim();
+      const res = await fetch(REDEEM_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          apikey: SUPABASE_ANON,
+          Authorization: `Bearer ${SUPABASE_ANON}`
+        },
+        body: JSON.stringify({ inviteCode: code, deviceId, label })
+      });
+      const data = await res.json();
+      if (!data || !data.token) {
+        setAuthState({ status: "unauth", message: "" });
+        setAuthError(data?.error || "Invite rejected.");
+        setAuthBusy(false);
+        return;
+      }
+      const expiresAt = Number(data.expiresAt) || Date.now() + 24 * 60 * 60 * 1000;
+      localStorage.setItem("Hound.token", data.token);
+      localStorage.setItem("Hound.tokenExpires", String(expiresAt));
+      setAuthState({ status: "authed", message: "" });
+    } catch {
+      setAuthState({ status: "unauth", message: "" });
+      setAuthError("Could not reach access server.");
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
+  const clearLibrary = () => {
+    setTracks([]);
+    setSelectedTrackId(null);
+    setScreen("library");
+    setIsPlaying(false);
+    setQueue([]);
+    setImportError("");
+    stopAllAudio();
+    setCurrentTime(0);
+    setDuration(0);
+  };
+
+  const handleRowClick = (trackId, contextOverride = null) => {
+    const index = tracks.findIndex((track) => track.id === trackId);
+    if (index === -1) return;
+    const baseContext = contextOverride || {
+      type: "library",
+      id: null,
+      label: "Library",
+      shuffle: shuffleOn,
+      trackIds: tracks.map((track) => track.id)
+    };
+    setContext(baseContext);
+    shufflePlanRef.current = { list: [], index: -1, contextKey: "" };
+    if (baseContext.shuffle || (baseContext.type === "library" && shuffleOn)) {
+      shufflePlanRef.current = { list: [trackId], index: 0 };
+    }
+    goToTrack(index);
+  };
+
+  const queueTrackNext = (trackId) => {
+    if (!trackId) return;
+    setQueue((prev) => [...prev, trackId]);
+  };
+
+  const toggleRotation = () => {
+    if (!selectedTrack) return;
+    setTracks((prev) =>
+      prev.map((track) =>
+        track.id === selectedTrack.id
+          ? {
+            ...track,
+            rotation: !track.rotation,
+            rotationManual: !track.rotation,
+            rotationOverride: !track.rotation ? "force_on" : "force_off"
+          }
+          : track
+      )
+    );
+  };
+
+  const toggleSave = () => {
+    if (!selectedTrack) return;
+    setTracks((prev) =>
+      prev.map((track) =>
+        track.id === selectedTrack.id ? { ...track, saved: !track.saved } : track
+      )
+    );
+  };
+
+  const setRotationOverrideFor = (trackId, override) => {
+    setTracks((prev) =>
+      prev.map((track) => {
+        if (track.id !== trackId) return track;
+        if (override === "force_on") {
+          return {
+            ...track,
+            rotation: true,
+            rotationManual: true,
+            rotationOverride: "force_on"
+          };
+        }
+        if (override === "force_off") {
+          return {
+            ...track,
+            rotation: false,
+            rotationManual: false,
+            rotationOverride: "force_off"
+          };
+        }
+        return {
+          ...track,
+          rotationManual: null,
+          rotationOverride: "none"
+        };
+      })
+    );
+  };
+
+  const toggleRotationFor = (trackId) => {
+    setTracks((prev) =>
+      prev.map((track) =>
+        track.id === trackId
+          ? {
+            ...track,
+            rotation: !track.rotation,
+            rotationManual: !track.rotation,
+            rotationOverride: !track.rotation ? "force_on" : "force_off"
+          }
+          : track
+      )
+    );
+  };
+
+  const toggleSaveFor = (trackId) => {
+    setTracks((prev) =>
+      prev.map((track) =>
+        track.id === trackId ? { ...track, saved: !track.saved } : track
+      )
+    );
+  };
+
+  const openRotationMenu = (trackId, event) => {
+    event.stopPropagation();
+    const rect = event.currentTarget.getBoundingClientRect();
+    setRotationMenu({
+      trackId,
+      x: rect.left,
+      y: rect.bottom + 6
+    });
+  };
+
+  const openContextMenu = (trackId, event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setContextMenu({
+      trackId,
+      x: event.clientX,
+      y: event.clientY,
+      rotationOpen: false
+    });
+  };
+
+  const formatTime = (value) => {
+    if (!Number.isFinite(value) || value < 0) return "0:00";
+    const minutes = Math.floor(value / 60);
+    const seconds = Math.floor(value % 60);
+    return `${minutes}:${String(seconds).padStart(2, "0")}`;
+  };
+
+  const handleScrubStart = () => {
+    setIsSeeking(true);
+  };
+
+  const handleScrubChange = (event) => {
+    const nextValue = Number(event.target.value);
+    if (!Number.isFinite(nextValue)) return;
+    setCurrentTime(nextValue);
+  };
+
+  const handleScrubEnd = () => {
+    const audio = getActiveAudio();
+    if (!audio) {
+      setIsSeeking(false);
+      return;
+    }
+    audio.currentTime = currentTime;
+    setIsSeeking(false);
+  };
+
+  const toggleShuffle = () => {
+    const nextShuffle = !shuffleOn;
+    setShuffleOn(nextShuffle);
+    shufflePlanRef.current = { list: [], index: -1, contextKey: "" };
+    if (nextShuffle && selectedTrack) {
+      shufflePlanRef.current = { list: [selectedTrack.id], index: 0 };
+    }
+    setContext({
+      type: "library",
+      id: null,
+      label: "Library",
+      shuffle: nextShuffle,
+      trackIds: tracks.map((track) => track.id)
+    });
+  };
+  const toggleRepeatMode = () => {
+    setRepeatMode((prev) => (prev === "off" ? "all" : prev === "all" ? "one" : "off"));
+  };
+
+
+  const moveQueueItem = (index, direction) => {
+    setQueue((prev) => {
+      if (index < 0 || index >= prev.length) return prev;
+      const nextIndex = index + direction;
+      if (nextIndex < 0 || nextIndex >= prev.length) return prev;
+      const next = [...prev];
+      const [item] = next.splice(index, 1);
+      next.splice(nextIndex, 0, item);
+      return next;
+    });
+  };
+
+  const moveQueueItemTo = (fromIndex, toIndex) => {
+    setQueue((prev) => {
+      if (fromIndex < 0 || fromIndex >= prev.length) return prev;
+      if (toIndex < 0 || toIndex >= prev.length) return prev;
+      if (fromIndex === toIndex) return prev;
+      const next = [...prev];
+      const [item] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, item);
+      return next;
+    });
+  };
+
+  const removeQueueItem = (index) => {
+    setQueue((prev) => prev.filter((_, idx) => idx !== index));
+  };
+
+  const clearQueue = () => {
+    setQueue([]);
+  };
+
+  const queueItems = useMemo(() => {
+    return queue
+      .map((id) => tracks.find((track) => track.id === id))
+      .filter(Boolean);
+  }, [queue, tracks]);
+
+  const selectedPlaylist = useMemo(
+    () => playlists.find((playlist) => playlist.id === selectedPlaylistId) || null,
+    [playlists, selectedPlaylistId]
+  );
+
+  const createPlaylist = () => {
+    const name = newPlaylistName.trim();
+    if (!name) return;
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    setPlaylists((prev) => [...prev, { id, name, trackIds: [] }]);
+    setSelectedPlaylistId(id);
+    setNewPlaylistName("");
+    setCreatingPlaylist(false);
+  };
+
+  useEffect(() => {
+    if (!selectedPlaylistId) return;
+    setLastSession((prev) => ({
+      ...prev,
+      playlistId: selectedPlaylistId,
+      mode: sessionMode
+    }));
+  }, [selectedPlaylistId, sessionMode]);
+
+  const openAlbum = (name) => {
+    if (!name) return;
+    setActiveAlbum(name);
+    setScreen("album");
+  };
+
+  const openArtist = (name) => {
+    if (!name) return;
+    setActiveArtist(name);
+    setScreen("artist");
+  };
+
+  const resumeLastSession = (mode) => {
+    if (!lastSession || !lastSession.lastTrackId) return;
+    const index = tracks.findIndex((track) => track.id === lastSession.lastTrackId);
+    if (index === -1) return;
+    setSessionMode(mode);
+    setQueue(Array.isArray(lastSession.queue) ? lastSession.queue : []);
+    goToTrack(index);
+  };
+
+  const continueQueue = () => {
+    if (!lastSession || !Array.isArray(lastSession.queue)) return;
+    setQueue(lastSession.queue);
+  };
+
+  const continuePlaylist = () => {
+    if (!lastSession || !lastSession.playlistId) return;
+    setSelectedPlaylistId(lastSession.playlistId);
+    setScreen("playlist");
+  };
+
+  const playAlbum = () => {
+    if (albumTracks.length === 0) return;
+    const trackIds = albumTracks.map((track) => track.id);
+    const index = tracks.findIndex((track) => track.id === albumTracks[0].id);
+    if (index >= 0) {
+      setContext({
+        type: "album",
+        id: activeAlbum,
+        name: activeAlbum,
+        label: `Album: ${activeAlbum || "Unknown Album"}`,
+        shuffle: false,
+        trackIds
+      });
+      goToTrack(index);
+    }
+  };
+
+  const shuffleAlbum = () => {
+    if (albumTracks.length === 0) return;
+    const trackIds = albumTracks.map((track) => track.id);
+    const pick = albumTracks[Math.floor(Math.random() * albumTracks.length)];
+    const index = tracks.findIndex((track) => track.id === pick.id);
+    if (index >= 0) {
+      setContext({
+        type: "album",
+        id: activeAlbum,
+        name: activeAlbum,
+        label: `Album: ${activeAlbum || "Unknown Album"}`,
+        shuffle: true,
+        trackIds
+      });
+      shufflePlanRef.current = { list: [pick.id], index: 0 };
+      goToTrack(index);
+    }
+  };
+
+  const addAlbumToPlaylist = () => {
+    if (!albumPlaylistId || albumTracks.length === 0) return;
+    albumTracks.forEach((track) => addTrackToPlaylist(albumPlaylistId, track.id));
+  };
+
+  const playArtist = () => {
+    if (artistTracks.length === 0) return;
+    const trackIds = artistTracks.map((track) => track.id);
+    const index = tracks.findIndex((track) => track.id === artistTracks[0].id);
+    if (index >= 0) {
+      setContext({
+        type: "artist",
+        id: activeArtist,
+        name: activeArtist,
+        label: `Artist: ${activeArtist || "Unknown Artist"}`,
+        shuffle: false,
+        trackIds
+      });
+      goToTrack(index);
+    }
+  };
+
+  const shuffleArtist = () => {
+    if (artistTracks.length === 0) return;
+    const trackIds = artistTracks.map((track) => track.id);
+    const pick = artistTracks[Math.floor(Math.random() * artistTracks.length)];
+    const index = tracks.findIndex((track) => track.id === pick.id);
+    if (index >= 0) {
+      setContext({
+        type: "artist",
+        id: activeArtist,
+        name: activeArtist,
+        label: `Artist: ${activeArtist || "Unknown Artist"}`,
+        shuffle: true,
+        trackIds
+      });
+      shufflePlanRef.current = { list: [pick.id], index: 0 };
+      goToTrack(index);
+    }
+  };
+
+  const addArtistToPlaylist = () => {
+    if (!artistPlaylistId || artistTracks.length === 0) return;
+    artistTracks.forEach((track) => addTrackToPlaylist(artistPlaylistId, track.id));
+  };
+
+  const playPlaylist = () => {
+    if (!selectedPlaylist || selectedPlaylist.trackIds.length === 0) return;
+    const trackIds = selectedPlaylist.trackIds;
+    const firstId = trackIds[0];
+    const index = tracks.findIndex((track) => track.id === firstId);
+    if (index >= 0) {
+      setContext({
+        type: "playlist",
+        id: selectedPlaylist.id,
+        name: selectedPlaylist.name,
+        label: `Playlist: ${selectedPlaylist.name}`,
+        shuffle: false,
+        trackIds
+      });
+      goToTrack(index);
+    }
+  };
+
+  const shufflePlaylist = () => {
+    if (!selectedPlaylist || selectedPlaylist.trackIds.length === 0) return;
+    const trackIds = selectedPlaylist.trackIds;
+    const pickId = trackIds[Math.floor(Math.random() * trackIds.length)];
+    const index = tracks.findIndex((track) => track.id === pickId);
+    if (index >= 0) {
+      setContext({
+        type: "playlist",
+        id: selectedPlaylist.id,
+        name: selectedPlaylist.name,
+        label: `Playlist: ${selectedPlaylist.name}`,
+        shuffle: true,
+        trackIds
+      });
+      shufflePlanRef.current = { list: [pickId], index: 0 };
+      goToTrack(index);
+    }
+  };
+
+  const addTrackToPlaylist = (playlistId, trackId) => {
+    setPlaylists((prev) =>
+      prev.map((playlist) => {
+        if (playlist.id !== playlistId) return playlist;
+        if (playlist.trackIds.includes(trackId)) return playlist;
+        return { ...playlist, trackIds: [...playlist.trackIds, trackId] };
+      })
+    );
+  };
+
+  const removeTrackFromPlaylist = (playlistId, trackId) => {
+    setPlaylists((prev) =>
+      prev.map((playlist) => {
+        if (playlist.id !== playlistId) return playlist;
+        return {
+          ...playlist,
+          trackIds: playlist.trackIds.filter((id) => id !== trackId)
+        };
+      })
+    );
+  };
+
+  const deletePlaylist = (playlistId) => {
+    setPlaylists((prev) => prev.filter((playlist) => playlist.id !== playlistId));
+    if (selectedPlaylistId === playlistId) {
+      setSelectedPlaylistId(null);
+    }
+  };
+
+  const startEditPlaylist = (playlist) => {
+    setEditingPlaylistId(playlist.id);
+    setEditingPlaylistName(playlist.name);
+  };
+
+  const cancelEditPlaylist = () => {
+    setEditingPlaylistId(null);
+    setEditingPlaylistName("");
+  };
+
+  const saveEditPlaylist = () => {
+    if (!editingPlaylistId) return;
+    const nextName = editingPlaylistName.trim();
+    if (!nextName) return;
+    setPlaylists((prev) =>
+      prev.map((playlist) =>
+        playlist.id === editingPlaylistId ? { ...playlist, name: nextName } : playlist
+      )
+    );
+    if (playbackContext.type === "playlist" && playbackContext.id === editingPlaylistId) {
+      setContext({
+        ...playbackContext,
+        name: nextName,
+        label: `Playlist: ${nextName}`
+      });
+    }
+    setEditingPlaylistId(null);
+    setEditingPlaylistName("");
+  };
+
+  const activeScreen = screen === "player" ? "player" : "library";
+  const activePage =
+    screen === "queue"
+      ? "queue"
+      : screen === "playlist"
+        ? "playlist"
+        : screen === "search"
+          ? "search"
+          : screen === "history"
+            ? "history"
+            : screen === "settings"
+              ? "settings"
+              : screen === "album"
+                ? "album"
+                : screen === "artist"
+                  ? "artist"
+                : screen === "home"
+                    ? "home"
+                    : activeScreen;
+  const viewTitle =
+    activePage === "home"
+      ? "Home"
+      : activePage === "library"
+        ? "Library"
+        : activePage === "search"
+          ? "Search"
+          : activePage === "playlist"
+            ? "Playlists"
+            : activePage === "settings"
+              ? "Settings"
+              : activePage === "player"
+                ? "Now Playing"
+                : activePage === "queue"
+                  ? "Queue"
+                  : activePage === "album"
+                    ? "Album"
+                    : activePage === "artist"
+                      ? "Artist"
+                      : "Library";
+  const rotationTracks = useMemo(() => tracks.filter((track) => track.rotation), [tracks]);
+  const savedTracks = useMemo(() => tracks.filter((track) => track.saved), [tracks]);
+  const recentTracks = useMemo(() => {
+    return [...tracks]
+      .map((track) => ({
+        track,
+        lastPlayed: track.playHistory?.[0]?.play_end_time || ""
+      }))
+      .filter((entry) => entry.lastPlayed)
+      .sort((a, b) => b.lastPlayed.localeCompare(a.lastPlayed))
+      .map((entry) => entry.track);
+  }, [tracks]);
+  const discoveryTracks = useMemo(
+    () => tracks.filter((track) => (track.playCountTotal || 0) === 0),
+    [tracks]
+  );
+  const query = searchQuery.trim().toLowerCase();
+  const searchTracks = query
+    ? tracks.filter(
+        (track) =>
+          track.title.toLowerCase().includes(query) ||
+          track.artist.toLowerCase().includes(query) ||
+          getAlbumName(track).toLowerCase().includes(query)
+      )
+    : [];
+  const searchPlaylists = query
+    ? playlists.filter((playlist) => playlist.name.toLowerCase().includes(query))
+    : [];
+  const searchArtists = query
+    ? Array.from(new Set(tracks.map((track) => track.artist)))
+      .filter((artist) => artist.toLowerCase().includes(query))
+    : [];
+  const searchAlbums = query
+    ? Array.from(new Set(tracks.map((track) => getAlbumName(track))))
+      .filter((album) => album.toLowerCase().includes(query))
+    : [];
+  const albumTracks = activeAlbum
+    ? tracks.filter((track) => getAlbumName(track) === activeAlbum)
+    : [];
+  const artistTracks = activeArtist
+    ? tracks.filter((track) => track.artist === activeArtist)
+    : [];
+  const artistAlbums = useMemo(() => {
+    if (!activeArtist) return [];
+    const albumSet = new Set(artistTracks.map((track) => getAlbumName(track)));
+    return Array.from(albumSet);
+  }, [activeArtist, artistTracks]);
+
+  if (!GATE_DISABLED && (authState.status === "unauth" || authState.status === "revoked")) {
+    return (
+      <div style={styles.app}>
+        <header style={styles.topBar}>
+          <div style={styles.brand}>HOUND</div>
+        </header>
+        <main style={styles.content}>
+          <section style={styles.homeCard}>
+            <div style={styles.homeCardTitle}>Private Beta Access</div>
+            <div style={styles.rowArtist}>
+              Enter your invite code to unlock Hound.
+            </div>
+            <input
+              type="text"
+              value={inviteCode}
+              onChange={(event) => setInviteCode(event.target.value)}
+              placeholder="Invite code"
+              style={styles.input}
+            />
+            <input
+              type="text"
+              value={inviteLabel}
+              onChange={(event) => setInviteLabel(event.target.value)}
+              placeholder="Name or email (optional)"
+              style={styles.input}
+            />
+            {authError ? <div style={styles.errorBanner}>{authError}</div> : null}
+            {authState.message ? (
+              <div style={styles.rowArtist}>{authState.message}</div>
+            ) : null}
+            <div style={styles.homeActions}>
+              <button
+                type="button"
+                style={styles.primaryButton}
+                onClick={redeemInvite}
+                disabled={authBusy}
+              >
+                {authBusy ? "Checking..." : "Unlock"}
+              </button>
+            </div>
+          </section>
+        </main>
+      </div>
+    );
+  }
+
+  return (
+    <div style={styles.app}>
+      <header style={styles.topBar}>
+        <button
+          type="button"
+          style={styles.menuButton}
+          onClick={() => setSidebarOpen((prev) => !prev)}
+          aria-label="Menu"
+        >
+          <IconMenu />
+        </button>
+        <div style={styles.topBarCenter}>{viewTitle}</div>
+        <button
+          type="button"
+          style={styles.settingsButton}
+          onClick={() => {
+            if (activePage !== "settings") setScreen("settings");
+          }}
+          aria-label="Settings"
+        >
+          <IconSettings />
+        </button>
+      </header>
+
+      <div style={styles.appBody}>
+        <aside style={{ ...styles.sidebar, ...(sidebarOpen ? {} : styles.sidebarHidden) }}>
+          <button
+            type="button"
+            style={{
+              ...styles.sidebarButton(activePage === "home"),
+              ...(sidebarOpen ? {} : { justifyContent: "center" })
+            }}
+            onClick={() => {
+              if (activePage !== "home") setScreen("home");
+            }}
+          >
+            <span style={styles.sidebarIcon}>
+              <IconHome />
+            </span>
+            {sidebarOpen ? "Home" : null}
+          </button>
+          <button
+            type="button"
+            style={{
+              ...styles.sidebarButton(activePage === "library"),
+              ...(sidebarOpen ? {} : { justifyContent: "center" })
+            }}
+            onClick={() => {
+              if (activePage !== "library") setScreen("library");
+            }}
+          >
+            <span style={styles.sidebarIcon}>
+              <IconLibrary />
+            </span>
+            {sidebarOpen ? "Library" : null}
+          </button>
+          <button
+            type="button"
+            style={{
+              ...styles.sidebarButton(activePage === "search"),
+              ...(sidebarOpen ? {} : { justifyContent: "center" })
+            }}
+            onClick={() => {
+              if (activePage !== "search") setScreen("search");
+            }}
+          >
+            <span style={styles.sidebarIcon}>
+              <IconSearch />
+            </span>
+            {sidebarOpen ? "Search" : null}
+          </button>
+          <button
+            type="button"
+            style={{
+              ...styles.sidebarButton(activePage === "playlist"),
+              ...(sidebarOpen ? {} : { justifyContent: "center" })
+            }}
+            onClick={() => {
+              if (activePage !== "playlist") setScreen("playlist");
+            }}
+          >
+            <span style={styles.sidebarIcon}>
+              <IconPlaylists />
+            </span>
+            {sidebarOpen ? "Playlists" : null}
+          </button>
+          <button
+            type="button"
+            style={{
+              ...styles.sidebarButton(activePage === "settings"),
+              ...(sidebarOpen ? {} : { justifyContent: "center" })
+            }}
+            onClick={() => {
+              if (activePage !== "settings") setScreen("settings");
+            }}
+          >
+            <span style={styles.sidebarIcon}>
+              <IconSettings />
+            </span>
+            {sidebarOpen ? "Settings" : null}
+          </button>
+        </aside>
+
+        <main style={styles.content}>
+        {activePage === "home" ? (
+          <section style={styles.homePage}>
+            <div style={styles.section}>
+              <div style={styles.sectionTitle}>Continue Listening</div>
+              <div style={styles.rowScroll}>
+                {recentTracks.slice(0, 6).map((track) => (
+                  <div
+                    key={track.id}
+                    style={styles.tile}
+                    onClick={() => handleRowClick(track.id)}
+                    onContextMenu={(event) => openContextMenu(track.id, event)}
+                  >
+                    <div style={styles.tileArt}>ART</div>
+                    <div style={styles.tileTitle}>{track.title}</div>
+                    <div style={styles.tileArtist}>{track.artist}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div style={styles.section}>
+              <div style={styles.sectionTitle}>In Rotation</div>
+              <div style={styles.rowScroll}>
+                {rotationTracks.slice(0, 6).map((track) => (
+                  <div
+                    key={track.id}
+                    style={styles.tile}
+                    onClick={() => handleRowClick(track.id)}
+                    onContextMenu={(event) => openContextMenu(track.id, event)}
+                  >
+                    <div style={styles.tileArt}>ART</div>
+                    <div style={styles.tileTitle}>{track.title}</div>
+                    <div style={styles.tileArtist}>{track.artist}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div style={styles.section}>
+              <div style={styles.sectionTitle}>Recently Heard</div>
+              <div style={styles.rowScroll}>
+                {recentTracks.slice(0, 8).map((track) => (
+                  <div
+                    key={track.id}
+                    style={styles.tile}
+                    onClick={() => handleRowClick(track.id)}
+                    onContextMenu={(event) => openContextMenu(track.id, event)}
+                  >
+                    <div style={styles.tileArt}>ART</div>
+                    <div style={styles.tileTitle}>{track.title}</div>
+                    <div style={styles.tileArtist}>{track.artist}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div style={styles.section}>
+              <div style={styles.sectionTitle}>Something New</div>
+              <div style={styles.rowScroll}>
+                {discoveryTracks.slice(0, 8).map((track) => (
+                  <div
+                    key={track.id}
+                    style={styles.tile}
+                    onClick={() => handleRowClick(track.id)}
+                    onContextMenu={(event) => openContextMenu(track.id, event)}
+                  >
+                    <div style={styles.tileArt}>ART</div>
+                    <div style={styles.tileTitle}>{track.title}</div>
+                    <div style={styles.tileArtist}>{track.artist}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+        ) : activePage === "library" ? (
+          <section style={styles.library}>
+            <div style={styles.headerRow}>
+              <div style={styles.listTitle}>Library</div>
+              <div style={styles.libraryButtons}>
+                <button type="button" style={styles.primaryButton} onClick={handleImport}>
+                  Import
+                </button>
+                <button type="button" style={styles.secondaryButton} onClick={clearLibrary}>
+                  Clear Library
+                </button>
+              </div>
+            </div>
+            {settings.loudnessEnabled && tracks.some((track) => !track.loudnessReady) ? (
+              <div style={styles.rowArtist}>
+                Analyzing loudness... playback stays available.
+              </div>
+            ) : null}
+            {importError ? <div style={styles.errorBanner}>{importError}</div> : null}
+            <div style={styles.table}>
+              <div style={styles.tableHeader}>
+                <span>Title</span>
+                <span>Artist</span>
+                <span>Album</span>
+                <span>Duration</span>
+                <span>Actions</span>
+              </div>
+              {tracks.map((track) => {
+                const durationSeconds = track.playHistory?.[0]?.track_total_duration || 0;
+                const showActions = hoveredLibraryId === track.id;
+                const showRotationControl =
+                  track.rotation || (track.rotationOverride && track.rotationOverride !== "none");
+                return (
+                  <div
+                    key={track.id}
+                    style={styles.tableRow(track.id === selectedTrackId)}
+                    onClick={() => handleRowClick(track.id)}
+                    onMouseEnter={() => setHoveredLibraryId(track.id)}
+                    onMouseLeave={() => setHoveredLibraryId(null)}
+                    onContextMenu={(event) => openContextMenu(track.id, event)}
+                  >
+                    <div style={styles.tableCell}>{track.title}</div>
+                    <div style={styles.tableMeta}>{track.artist}</div>
+                    <div style={styles.tableMeta}>{getAlbumName(track)}</div>
+                    <div style={styles.tableMeta}>
+                      {durationSeconds ? formatTime(durationSeconds) : "--:--"}
+                    </div>
+                    <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end" }}>
+                      {showActions ? (
+                        <>
+                          <button
+                            type="button"
+                            style={{
+                              ...styles.iconButton,
+                              ...(track.saved ? styles.iconButtonActive : {})
+                            }}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              toggleSaveFor(track.id);
+                            }}
+                            aria-label="Save"
+                          >
+                            <IconSave filled={track.saved} />
+                          </button>
+                          {showRotationControl ? (
+                            <button
+                              type="button"
+                              style={{
+                                ...styles.iconButton,
+                                ...(track.rotation ? styles.iconButtonActive : {})
+                              }}
+                              onClick={(event) => openRotationMenu(track.id, event)}
+                              aria-label="Rotation"
+                            >
+                              <IconRotation slashed={track.rotationOverride === "force_off"} />
+                            </button>
+                          ) : null}
+                        </>
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              })}
+              {tracks.length === 0 ? (
+                <div style={styles.empty}>No tracks yet. Click Import.</div>
+              ) : null}
+            </div>
+          </section>
+        ) : activePage === "search" ? (
+          <section style={styles.searchPage}>
+            <input
+              type="text"
+              ref={searchInputRef}
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="Search tracks, artists, albums, playlists"
+              style={styles.input}
+            />
+            {!query ? (
+              <div style={styles.empty}>Type to search your library.</div>
+            ) : (
+              <>
+                <div style={styles.listTitle}>Tracks</div>
+                <ul style={styles.list}>
+                  {searchTracks.map((track) => (
+                    <li
+                      key={track.id}
+                      style={styles.row(track.id === selectedTrackId)}
+                      onClick={() => handleRowClick(track.id, { type: "search", label: "Search", trackIds: searchTracks.map((item) => item.id) })}
+                      onContextMenu={(event) => openContextMenu(track.id, event)}
+                    >
+                      <div style={styles.rowTitle}>
+                        <span>{track.title}</span>
+                      </div>
+                      <div style={styles.rowArtist}>{track.artist}</div>
+                    </li>
+                  ))}
+                  {searchTracks.length === 0 ? (
+                    <li style={styles.empty}>No track matches.</li>
+                  ) : null}
+                </ul>
+                <div style={styles.listTitle}>Artists</div>
+                <ul style={styles.list}>
+                  {searchArtists.map((artist) => (
+                    <li
+                      key={artist}
+                      style={styles.row(activeArtist === artist)}
+                      onClick={() => openArtist(artist)}
+                    >
+                      <div style={styles.rowTitle}>
+                        <span>{artist}</span>
+                      </div>
+                    </li>
+                  ))}
+                  {searchArtists.length === 0 ? (
+                    <li style={styles.empty}>No artist matches.</li>
+                  ) : null}
+                </ul>
+                <div style={styles.listTitle}>Albums</div>
+                <ul style={styles.list}>
+                  {searchAlbums.map((album) => (
+                    <li
+                      key={album}
+                      style={styles.row(activeAlbum === album)}
+                      onClick={() => openAlbum(album)}
+                    >
+                      <div style={styles.rowTitle}>
+                        <span>{album}</span>
+                      </div>
+                    </li>
+                  ))}
+                  {searchAlbums.length === 0 ? (
+                    <li style={styles.empty}>No album matches.</li>
+                  ) : null}
+                </ul>
+                {searchTracks.length === 0 &&
+                searchArtists.length === 0 &&
+                searchAlbums.length === 0 ? (
+                  <div style={styles.empty}>No results found.</div>
+                ) : null}
+              </>
+            )}
+          </section>
+        ) : activePage === "history" ? (
+          <section style={styles.searchPage}>
+            <div style={styles.listTitle}>Session History</div>
+            <ul style={styles.list}>
+              {sessionHistory.map((entry) => (
+                <li
+                  key={entry.id}
+                  style={styles.row(false)}
+                  onClick={() => setRecap(entry.payload)}
+                >
+                  <div style={styles.rowTitle}>
+                    <span>{new Date(entry.date).toLocaleString()}</span>
+                    <span style={styles.badge}>{entry.mode || "Normal"}</span>
+                  </div>
+                  <div style={styles.rowArtist}>
+                    Duration: {entry.payload.listenedSeconds}s
+                  </div>
+                </li>
+              ))}
+              {sessionHistory.length === 0 ? (
+                <li style={styles.empty}>No sessions yet.</li>
+              ) : null}
+            </ul>
+          </section>
+        ) : activePage === "settings" ? (
+          <section style={styles.settingsPage}>
+            <div style={styles.settingsSection}>
+              <div style={styles.homeCardTitle}>Account</div>
+              <div style={styles.settingRow}>
+                <span>Access</span>
+                <span>Local</span>
+              </div>
+            </div>
+            <div style={styles.settingsSection}>
+              <div style={styles.homeCardTitle}>Storage</div>
+              <div style={styles.settingRow}>
+                <span>Tracks</span>
+                <span>{tracks.length}</span>
+              </div>
+              <div style={styles.settingRow}>
+                <span>Playlists</span>
+                <span>{playlists.length}</span>
+              </div>
+            </div>
+            <div style={styles.settingsSection}>
+              <div style={styles.homeCardTitle}>Advanced</div>
+              <div style={styles.settingRow}>
+                <span>Show Advanced</span>
+                <input
+                  type="checkbox"
+                  checked={showAdvanced}
+                  onChange={(event) => setShowAdvanced(event.target.checked)}
+                />
+              </div>
+              {showAdvanced ? (
+                <div style={styles.settingRow}>
+                  <span>Rotation overrides</span>
+                  <span>Manual only</span>
+                </div>
+              ) : null}
+            </div>
+          </section>
+        ) : activePage === "album" ? (
+          <section style={styles.playlistPage}>
+            <div style={styles.listTitle}>Album</div>
+            <div style={styles.rowArtist}>{activeAlbum || "Unknown Album"}</div>
+            <div style={styles.homeActions}>
+              <button type="button" style={styles.secondaryButton} onClick={playAlbum}>
+                Play Album
+              </button>
+              <button type="button" style={styles.secondaryButton} onClick={shuffleAlbum}>
+                Shuffle Album
+              </button>
+            </div>
+            <div style={styles.homeActions}>
+              <select
+                value={albumPlaylistId}
+                onChange={(event) => setAlbumPlaylistId(event.target.value)}
+                style={styles.input}
+              >
+                <option value="">Add album to playlist</option>
+                {playlists.map((playlist) => (
+                  <option key={playlist.id} value={playlist.id}>
+                    {playlist.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                style={styles.secondaryButton}
+                onClick={addAlbumToPlaylist}
+                disabled={!albumPlaylistId || albumTracks.length === 0}
+              >
+                Add Album
+              </button>
+            </div>
+            <ul style={styles.list}>
+              {albumTracks.map((track) => (
+                <li
+                  key={track.id}
+                  style={styles.row(track.id === selectedTrackId)}
+                  onClick={() =>
+                    handleRowClick(track.id, {
+                      type: "album",
+                      id: activeAlbum,
+                      name: activeAlbum,
+                      label: `Album: ${activeAlbum || "Unknown Album"}`,
+                      trackIds: albumTracks.map((item) => item.id)
+                    })
+                  }
+                  onContextMenu={(event) => openContextMenu(track.id, event)}
+                >
+                  <div style={styles.rowTitle}>
+                    <span>{track.title}</span>
+                  </div>
+                  <div style={styles.rowArtist}>{track.artist}</div>
+                </li>
+              ))}
+              {albumTracks.length === 0 ? (
+                <li style={styles.empty}>No album tracks found.</li>
+              ) : null}
+            </ul>
+          </section>
+        ) : activePage === "artist" ? (
+          <section style={styles.playlistPage}>
+            <div style={styles.listTitle}>Artist</div>
+            <div style={styles.rowArtist}>{activeArtist || "Unknown Artist"}</div>
+            <div style={styles.homeActions}>
+              <button type="button" style={styles.secondaryButton} onClick={playArtist}>
+                Play Artist
+              </button>
+              <button type="button" style={styles.secondaryButton} onClick={shuffleArtist}>
+                Shuffle Artist
+              </button>
+            </div>
+            <div style={styles.homeActions}>
+              <select
+                value={artistPlaylistId}
+                onChange={(event) => setArtistPlaylistId(event.target.value)}
+                style={styles.input}
+              >
+                <option value="">Add artist to playlist</option>
+                {playlists.map((playlist) => (
+                  <option key={playlist.id} value={playlist.id}>
+                    {playlist.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                style={styles.secondaryButton}
+                onClick={addArtistToPlaylist}
+                disabled={!artistPlaylistId || artistTracks.length === 0}
+              >
+                Add Artist
+              </button>
+            </div>
+            <div style={styles.listTitle}>Albums</div>
+            <ul style={styles.list}>
+              {artistAlbums.map((album) => (
+                <li
+                  key={album}
+                  style={styles.row(false)}
+                  onClick={() => openAlbum(album)}
+                >
+                  <div style={styles.rowTitle}>
+                    <span>{album}</span>
+                  </div>
+                </li>
+              ))}
+              {artistAlbums.length === 0 ? (
+                <li style={styles.empty}>No albums found.</li>
+              ) : null}
+            </ul>
+            <div style={styles.listTitle}>Tracks</div>
+            <ul style={styles.list}>
+              {artistTracks.map((track) => (
+                <li
+                  key={track.id}
+                  style={styles.row(track.id === selectedTrackId)}
+                  onClick={() =>
+                    handleRowClick(track.id, {
+                      type: "artist",
+                      id: activeArtist,
+                      name: activeArtist,
+                      label: `Artist: ${activeArtist || "Unknown Artist"}`,
+                      trackIds: artistTracks.map((item) => item.id)
+                    })
+                  }
+                  onContextMenu={(event) => openContextMenu(track.id, event)}
+                >
+                  <div style={styles.rowTitle}>
+                    <span>{track.title}</span>
+                  </div>
+                  <div style={styles.rowArtist}>{track.artist}</div>
+                </li>
+              ))}
+              {artistTracks.length === 0 ? (
+                <li style={styles.empty}>No tracks found.</li>
+              ) : null}
+            </ul>
+          </section>
+        ) : activePage === "queue" ? (
+          <section style={styles.queuePage}>
+            <div style={styles.queuePanel}>
+              <div style={styles.queueHeader}>
+                <span>Queue</span>
+                <button
+                  type="button"
+                  style={styles.queueActionButton}
+                  onClick={clearQueue}
+                  disabled={queue.length === 0}
+                >
+                  Clear Queue
+                </button>
+              </div>
+              {queueItems.length === 0 ? (
+                <div style={styles.empty}>Queue is empty.</div>
+              ) : (
+                <ul style={styles.queueList}>
+                  {queueItems.map((track, index) => (
+                    <li
+                      key={`${track.id}-${index}`}
+                      style={styles.queueRow}
+                      onClick={() => handleRowClick(track.id, { type: "queue", label: "Queue", trackIds: queueItems.map((item) => item.id) })}
+                      draggable
+                      onDragStart={(event) => {
+                        event.dataTransfer.setData("text/plain", String(index));
+                        event.dataTransfer.effectAllowed = "move";
+                      }}
+                      onDragOver={(event) => {
+                        event.preventDefault();
+                        event.dataTransfer.dropEffect = "move";
+                      }}
+                      onDrop={(event) => {
+                        event.preventDefault();
+                        const raw = event.dataTransfer.getData("text/plain");
+                        const fromIndex = Number(raw);
+                        if (Number.isFinite(fromIndex)) {
+                          moveQueueItemTo(fromIndex, index);
+                        }
+                      }}
+                    >
+                      <div style={styles.queueMeta}>
+                        <span style={styles.queueTitle}>{track.title}</span>
+                        <span style={styles.queueArtist}>{track.artist}</span>
+                      </div>
+                      <div style={styles.queueActions}>
+                        {settings.loudnessEnabled && !track.loudnessReady ? (
+                          <span style={styles.badge}>Analyzing</span>
+                        ) : null}
+                        <button
+                          type="button"
+                          style={styles.queueDrag}
+                          aria-label="Drag to reorder"
+                        >
+                          Drag
+                        </button>
+                        <button
+                          type="button"
+                          style={styles.queueActionButton}
+                          onClick={() => removeQueueItem(index)}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </section>
+        ) : activePage === "playlist" ? (
+          <section style={styles.playlistPage}>
+            <div style={styles.headerRow}>
+              <div style={styles.listTitle}>Playlists</div>
+              <button
+                type="button"
+                style={styles.primaryButton}
+                onClick={() => setCreatingPlaylist(true)}
+              >
+                New Playlist
+              </button>
+            </div>
+            {creatingPlaylist ? (
+              <div style={styles.libraryButtons}>
+                <input
+                  type="text"
+                  value={newPlaylistName}
+                  onChange={(event) => setNewPlaylistName(event.target.value)}
+                  placeholder="Playlist name"
+                  style={{
+                    flex: 1,
+                    minWidth: "200px",
+                    border: "1px solid #334155",
+                    background: "transparent",
+                    color: "#e5e7eb",
+                    padding: "10px 12px",
+                    borderRadius: "8px"
+                  }}
+                />
+                <button type="button" style={styles.primaryButton} onClick={createPlaylist}>
+                  Create
+                </button>
+                <button
+                  type="button"
+                  style={styles.secondaryButton}
+                  onClick={() => {
+                    setCreatingPlaylist(false);
+                    setNewPlaylistName("");
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : null}
+            <div style={styles.listTitle}>Your Playlists</div>
+            <ul style={styles.list}>
+              {playlists.map((playlist) => (
+              <li
+                key={playlist.id}
+                style={styles.row(playlist.id === selectedPlaylistId)}
+                onClick={() => setSelectedPlaylistId(playlist.id)}
+              >
+                <div style={styles.rowTitle}>
+                  {editingPlaylistId === playlist.id ? (
+                    <input
+                      type="text"
+                      value={editingPlaylistName}
+                      onChange={(event) => setEditingPlaylistName(event.target.value)}
+                      onClick={(event) => event.stopPropagation()}
+                      style={styles.input}
+                    />
+                  ) : (
+                    <span>{playlist.name}</span>
+                  )}
+                  <div style={styles.rowActions}>
+                    <span style={styles.badge}>{playlist.trackIds.length} tracks</span>
+                    {editingPlaylistId === playlist.id ? (
+                      <>
+                        <button
+                          type="button"
+                          style={styles.queueButton}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            saveEditPlaylist();
+                          }}
+                        >
+                          Save
+                        </button>
+                        <button
+                          type="button"
+                          style={styles.queueButton}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            cancelEditPlaylist();
+                          }}
+                        >
+                          Cancel
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          style={styles.queueButton}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            startEditPlaylist(playlist);
+                          }}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          style={styles.queueButton}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            deletePlaylist(playlist.id);
+                          }}
+                        >
+                          Delete
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </li>
+            ))}
+              {playlists.length === 0 ? (
+                <li style={styles.empty}>No playlists yet.</li>
+              ) : null}
+            </ul>
+            <div style={styles.listTitle}>Playlist Tracks</div>
+            {selectedPlaylist ? (
+              <>
+                <div style={styles.rowArtist}>{selectedPlaylist.name}</div>
+                <div style={styles.homeActions}>
+                  <button
+                    type="button"
+                    style={styles.secondaryButton}
+                    onClick={playPlaylist}
+                    disabled={selectedPlaylist.trackIds.length === 0}
+                  >
+                    Play Playlist
+                  </button>
+                  <button
+                    type="button"
+                    style={styles.secondaryButton}
+                    onClick={shufflePlaylist}
+                    disabled={selectedPlaylist.trackIds.length === 0}
+                  >
+                    Shuffle Playlist
+                  </button>
+                  <button
+                    type="button"
+                    style={styles.secondaryButton}
+                    onClick={() => {
+                      if (window.confirm("Delete this playlist?")) {
+                        deletePlaylist(selectedPlaylist.id);
+                      }
+                    }}
+                  >
+                    Delete
+                  </button>
+                </div>
+                <ul style={styles.list}>
+                  {selectedPlaylist.trackIds.map((trackId) => {
+                    const track = tracks.find((item) => item.id === trackId);
+                    if (!track) return null;
+                    return (
+                      <li
+                        key={track.id}
+                        style={styles.row(track.id === selectedTrackId)}
+                        onClick={() => handleRowClick(track.id, { type: "playlist", id: selectedPlaylist.id, name: selectedPlaylist.name, label: `Playlist: ${selectedPlaylist.name}`, trackIds: selectedPlaylist.trackIds })}
+                        onContextMenu={(event) => openContextMenu(track.id, event)}
+                      >
+                        <div style={styles.rowTitle}>
+                          <span>{track.title}</span>
+                          <div style={styles.rowActions}>
+                            {settings.loudnessEnabled && !track.loudnessReady ? (
+                              <span style={styles.badge}>Analyzing</span>
+                            ) : null}
+                            <button
+                              type="button"
+                              style={styles.queueButton}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                removeTrackFromPlaylist(selectedPlaylist.id, track.id);
+                              }}
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        </div>
+                        <div style={styles.rowArtist}>{track.artist}</div>
+                      </li>
+                    );
+                  })}
+                  {selectedPlaylist.trackIds.length === 0 ? (
+                    <li style={styles.empty}>Playlist is empty.</li>
+                  ) : null}
+                </ul>
+                <div style={styles.listTitle}>Add Tracks</div>
+                <ul style={styles.list}>
+                  {tracks
+                    .filter((track) => !selectedPlaylist.trackIds.includes(track.id))
+                    .map((track) => {
+                    const inPlaylist = selectedPlaylist.trackIds.includes(track.id);
+                    return (
+                      <li key={track.id} style={styles.row(false)}>
+                        <div style={styles.rowTitle}>
+                          <span>{track.title}</span>
+                          <div style={styles.rowActions}>
+                            {inPlaylist ? <span style={styles.badge}>Added</span> : null}
+                            <button
+                              type="button"
+                              style={styles.queueButton}
+                              onClick={() =>
+                                addTrackToPlaylist(selectedPlaylist.id, track.id)
+                              }
+                              disabled={inPlaylist}
+                            >
+                              Add
+                            </button>
+                          </div>
+                        </div>
+                        <div style={styles.rowArtist}>{track.artist}</div>
+                      </li>
+                    );
+                  })}
+                  {tracks.length === 0 ? (
+                    <li style={styles.empty}>Import tracks to add.</li>
+                  ) : null}
+                </ul>
+              </>
+            ) : (
+              <div style={styles.empty}>Select a playlist to view tracks.</div>
+            )}
+          </section>
+        ) : (
+          <section style={styles.playerWrap}>
+            <div style={styles.playerCard}>
+              {selectedTrack ? (
+                <>
+                  <div style={styles.cover}>Cover Art</div>
+                  <div style={{ minHeight: "48px" }}>
+                    <h2 style={styles.trackTitle}>
+                      <MarqueeText text={selectedTrack.title} maxChars={22} />
+                    </h2>
+                    <p style={styles.trackArtist}>
+                      <MarqueeText
+                        text={`${selectedTrack.artist} - ${getAlbumName(selectedTrack)}`}
+                        maxChars={36}
+                      />
+                    </p>
+                  </div>
+                  {error ? <div style={styles.errorBanner}>{error}</div> : null}
+                  <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                    <input
+                      type="range"
+                      min={0}
+                      max={duration || 0}
+                      step="0.1"
+                      value={currentTime}
+                      onMouseDown={handleScrubStart}
+                      onTouchStart={handleScrubStart}
+                      onChange={handleScrubChange}
+                      onMouseUp={handleScrubEnd}
+                      onTouchEnd={handleScrubEnd}
+                      disabled={!selectedTrack}
+                      aria-label="Seek"
+                    />
+                    <div
+                      style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", color: "#9ca3af" }}
+                    >
+                      <span onClick={() => setShowRemaining((prev) => !prev)} style={{ cursor: "pointer" }}>
+                        {showRemaining
+                          ? `-${formatTime(Math.max(duration - currentTime, 0))}`
+                          : formatTime(currentTime)}
+                      </span>
+                      <span>{formatTime(duration)}</span>
+                    </div>
+                  </div>
+                  <div style={styles.controls}>
+                    <button
+                      type="button"
+                      style={styles.controlButton}
+                      onClick={handlePrev}
+                      aria-label="Previous"
+                    >
+                      <IconPrev />
+                    </button>
+                    <button
+                      type="button"
+                      style={{ ...styles.controlButton, ...styles.playButton }}
+                      onClick={togglePlayPause}
+                      aria-label="Play/Pause"
+                    >
+                      {isPlaying ? <IconPause /> : <IconPlay />}
+                    </button>
+                    <button
+                      type="button"
+                      style={styles.controlButton}
+                      onClick={() => handleNext({ manual: true })}
+                      aria-label="Next"
+                    >
+                      <IconNext />
+                    </button>
+                  </div>
+                  <div style={styles.controls}>
+                    <button
+                      type="button"
+                      style={{
+                        ...styles.controlButton,
+                        ...(selectedTrack.saved ? styles.saveActive : {})
+                      }}
+                      onClick={toggleSave}
+                      aria-label="Save"
+                    >
+                      <IconSave filled={selectedTrack.saved} />
+                    </button>
+                    <button
+                      type="button"
+                      style={{
+                        ...styles.controlButton,
+                        ...(selectedTrack.rotation ? styles.likeActive : {}),
+                        ...(selectedTrack.rotation || selectedTrack.rotationOverride !== "none"
+                          ? {}
+                          : { opacity: 0.6 })
+                      }}
+                      onClick={(event) => openRotationMenu(selectedTrack.id, event)}
+                      aria-label="Rotation"
+                    >
+                      <IconRotation slashed={selectedTrack.rotationOverride === "force_off"} />
+                    </button>
+                    <button
+                      type="button"
+                      style={styles.controlButton}
+                      onClick={() => setScreen("queue")}
+                      aria-label="Queue"
+                    >
+                      <IconQueue />
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div style={styles.empty}>Select a track from Library.</div>
+              )}
+            </div>
+          </section>
+        )}
+      </main>
+      </div>
+
+      {selectedTrack ? (
+        <div
+          style={styles.nowPlayingBar}
+          onClick={() => setScreen("player")}
+          role="button"
+          tabIndex={0}
+        >
+          <div style={styles.nowPlayingLeft}>
+            <div style={styles.nowPlayingArt}>ART</div>
+            <div style={styles.nowPlayingInfo}>
+              <div style={{ minWidth: 0 }}>
+                <MarqueeText text={selectedTrack.title} maxChars={24} />
+                <MarqueeText text={selectedTrack.artist} maxChars={28} />
+              </div>
+            </div>
+          </div>
+          <div style={styles.nowPlayingCenter}>
+            <div style={styles.nowPlayingControls}>
+              <button
+                type="button"
+                style={styles.nowPlayingButton}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  handlePrev();
+                }}
+                aria-label="Previous"
+              >
+                <IconPrev />
+              </button>
+              <button
+                type="button"
+                style={styles.nowPlayingButton}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  togglePlayPause();
+                }}
+                aria-label="Play/Pause"
+              >
+                {isPlaying ? <IconPause /> : <IconPlay />}
+              </button>
+              <button
+                type="button"
+                style={styles.nowPlayingButton}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  handleNext({ manual: true });
+                }}
+                aria-label="Next"
+              >
+                <IconNext />
+              </button>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={duration || 0}
+              step="0.1"
+              value={currentTime}
+              style={{ width: "100%" }}
+              onClick={(event) => event.stopPropagation()}
+              onMouseDown={handleScrubStart}
+              onTouchStart={handleScrubStart}
+              onChange={handleScrubChange}
+              onMouseUp={handleScrubEnd}
+              onTouchEnd={handleScrubEnd}
+              aria-label="Seek"
+            />
+            <div style={{ display: "flex", justifyContent: "space-between", width: "100%", fontSize: "11px", color: "#9ca3af" }}>
+              <span>{formatTime(currentTime)}</span>
+              <span>{formatTime(Math.max(duration - currentTime, 0))}</span>
+            </div>
+          </div>
+          <div style={styles.nowPlayingRight}>
+            <button
+              type="button"
+              style={{
+                ...styles.nowPlayingButton,
+                ...(selectedTrack.saved ? styles.saveActive : {})
+              }}
+              onClick={(event) => {
+                event.stopPropagation();
+                toggleSave();
+              }}
+              aria-label="Save"
+            >
+              <IconSave filled={selectedTrack.saved} />
+            </button>
+            <button
+              type="button"
+              style={styles.nowPlayingButton}
+              onClick={(event) => {
+                event.stopPropagation();
+                setScreen("queue");
+              }}
+              aria-label="Queue"
+            >
+              <IconQueue />
+            </button>
+            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <IconVolume />
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.01}
+                value={volume}
+                onClick={(event) => event.stopPropagation()}
+                onChange={(event) => setVolume(Number(event.target.value))}
+                aria-label="Volume"
+              />
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {rotationMenu ? (
+        <div
+          style={{ ...styles.menuPopup, left: rotationMenu.x, top: rotationMenu.y }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div
+            style={styles.menuItem}
+            onClick={() => {
+              setRotationOverrideFor(rotationMenu.trackId, "none");
+              setRotationMenu(null);
+            }}
+          >
+            Auto
+          </div>
+          <div
+            style={styles.menuItem}
+            onClick={() => {
+              setRotationOverrideFor(rotationMenu.trackId, "force_on");
+              setRotationMenu(null);
+            }}
+          >
+            Force On
+          </div>
+          <div
+            style={styles.menuItem}
+            onClick={() => {
+              setRotationOverrideFor(rotationMenu.trackId, "force_off");
+              setRotationMenu(null);
+            }}
+          >
+            Force Off
+          </div>
+        </div>
+      ) : null}
+
+      {contextMenu ? (
+        <div
+          style={{ ...styles.menuPopup, left: contextMenu.x, top: contextMenu.y }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div
+            style={styles.menuItem}
+            onClick={() => {
+              handleRowClick(contextMenu.trackId);
+              setContextMenu(null);
+            }}
+          >
+            Play
+          </div>
+          <div
+            style={styles.menuItem}
+            onClick={() => {
+              queueTrackNext(contextMenu.trackId);
+              setContextMenu(null);
+            }}
+          >
+            Add to Queue
+          </div>
+          <div
+            style={styles.menuItem}
+            onClick={() => {
+              toggleSaveFor(contextMenu.trackId);
+              setContextMenu(null);
+            }}
+          >
+            {tracks.find((track) => track.id === contextMenu.trackId)?.saved ? "Unsave" : "Save"}
+          </div>
+          <div
+            style={{ ...styles.menuItem, ...styles.menuItemMuted }}
+            onClick={() =>
+              setContextMenu((prev) =>
+                prev ? { ...prev, rotationOpen: !prev.rotationOpen } : prev
+              )
+            }
+          >
+            Rotation
+          </div>
+          {contextMenu.rotationOpen ? (
+            <div style={styles.menuSub}>
+              <div
+                style={styles.menuItem}
+                onClick={() => {
+                  setRotationOverrideFor(contextMenu.trackId, "none");
+                  setContextMenu(null);
+                }}
+              >
+                Auto
+              </div>
+              <div
+                style={styles.menuItem}
+                onClick={() => {
+                  setRotationOverrideFor(contextMenu.trackId, "force_on");
+                  setContextMenu(null);
+                }}
+              >
+                Force On
+              </div>
+              <div
+                style={styles.menuItem}
+                onClick={() => {
+                  setRotationOverrideFor(contextMenu.trackId, "force_off");
+                  setContextMenu(null);
+                }}
+              >
+                Force Off
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {recap ? (
+        <div style={styles.modalOverlay}>
+          <div style={styles.modal}>
+            <div>Thanks for listening.</div>
+            <div>Time listened: {recap.listenedSeconds}s</div>
+            <div>Tracks played: {recap.tracksPlayed}</div>
+            <div>Skips: {recap.skips}</div>
+            <div style={styles.modalButtons}>
+              <button
+                type="button"
+                style={styles.secondaryButton}
+                onClick={() => setRecap(null)}
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                style={styles.primaryButton}
+                onClick={() => {
+                  setRecap(null);
+                  setScreen("library");
+                }}
+              >
+                Go to Library
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      <audio ref={audioARef} />
+      <audio ref={audioBRef} />
+    </div>
+  );
+}
+
+
+
+
+

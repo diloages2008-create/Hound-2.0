@@ -2,3 +2,9 @@ node_modules/
 dist/
 ui/dist/
 *.log
+
+.env
+
+.env
+den.env
+

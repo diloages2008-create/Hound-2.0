@@ -1,26 +1,17 @@
 {
-  "name": "hound",
-  "version": "0.1.0",
+  "name": "hound-monorepo",
   "private": true,
-  "type": "module",
-  "description": "Hound Phase 1 desktop app",
-  "main": "electron/main.cjs",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
-    "dev:web": "vite --config ui/vite.config.js",
-    "dev:app": "concurrently \"npm run dev:web\" \"npm run electron\"",
-    "start": "npm run dev:app",
-    "build": "vite build --config ui/vite.config.js",
-    "preview": "vite preview --config ui/vite.config.js",
-    "electron": "electron ./electron/main.cjs"
-  },
-  "dependencies": {
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0"
-  },
-  "devDependencies": {
-    "@vitejs/plugin-react": "^4.2.0",
-    "concurrently": "^8.2.2",
-    "electron": "^27.1.2",
-    "vite": "^5.0.3"
+    "listener:dev": "npm --workspace apps/hound-listener run dev:app",
+    "listener:web": "npm --workspace apps/hound-listener run dev:web",
+    "listener:build": "npm --workspace apps/hound-listener run build",
+    "listener:pack": "npm --workspace apps/hound-listener run pack",
+    "listener:dist": "npm --workspace apps/hound-listener run dist",
+    "studio:dev": "npm --workspace apps/hound-studio run dev",
+    "studio:build": "npm --workspace apps/hound-studio run build"
   }
 }
