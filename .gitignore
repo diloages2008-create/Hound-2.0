@@ -8,3 +8,32 @@ ui/dist/
 .env
 den.env
 
+# Electron / build outputs
+apps/**/dist/
+apps/**/out/
+apps/**/build/
+apps/**/release/
+apps/**/win-unpacked/
+apps/**/beta_build/
+apps/**/electron/ffmpeg/
+
+# Package artifacts
+*.exe
+*.dll
+*.zip
+*.7z
+*.msi
+*.dmg
+*.AppImage
+*.asar
+
+# Electron runtime assets
+*.pak
+*.bin
+*.dat
+*.blockmap
+
+# Supabase local artifacts
+apps/**/supabase/.temp/
+apps/**/supabase/supabase exe/
+
