@@ -4,10 +4,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg ca-certi
 
 WORKDIR /app
 
-COPY package.json ./
+COPY . ./
 
-RUN npm install --omit=dev
+RUN if [ -f package.json ]; then \
+      npm install --omit=dev; \
+    else \
+      npm init -y && npm install @supabase/supabase-js; \
+    fi
 
-COPY src ./src
-
-CMD ["npm", "run", "start"]
+CMD ["node", "src/index.mjs"]
