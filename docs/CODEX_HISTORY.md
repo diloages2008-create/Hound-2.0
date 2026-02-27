@@ -278,3 +278,21 @@ Key files:
   - `docs/V02_72_HOUR_DRILL_PLAN.md`
 - Updated docs navigation:
   - `docs/INDEX.md`
+
+## Session Log (2026-02-27, RLS Lockdown + Worker Deploy Push)
+- Applied production RLS lockdown migration:
+  - `apps/hound-listener/supabase/migrations/20260302_000005_rls_policy_lockdown.sql`
+- Redeployed `api-v1` with listener live-only checks for album detail and stream resolve.
+- Added policy summary:
+  - `docs/V02_RLS_POLICY_SUMMARY.md`
+- Executed production verification checks:
+  - anon draft access denied
+  - cross-artist draft read/update denied
+  - telemetry mismatch insert denied
+  - live listener routes succeed while draft route fails
+  - completed transcode jobs remain queryable via service-role path
+- Worker infrastructure progress on Render:
+  - background worker build/deploy path stabilized
+  - boot banner confirmed from production logs
+  - LIVE and RESTART checkpoints reached
+  - laptop-off checkpoint remains pending until public frontend hosting is available for non-local device flow.
