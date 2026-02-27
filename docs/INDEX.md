@@ -9,6 +9,7 @@ Use this file as the single navigation entry for docs.
 - `DEFINITION_OF_STABLE_V02.md`: v0.2 stability contract (72-hour test).
 - `V02_VERIFICATION_CHECKLIST.md`: Operator + engineering sign-off checklist.
 - `V02_OPERATOR_DASHBOARD_SPEC.md`: Minimum operator dashboard requirements.
+- `V02_72_HOUR_DRILL_PLAN.md`: Failure simulation drills with evidence capture.
 
 ## Handoff
 

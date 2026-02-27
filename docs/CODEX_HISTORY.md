@@ -274,5 +274,7 @@ Key files:
   - `docs/V02_VERIFICATION_CHECKLIST.md`
 - Added minimum operator dashboard specification:
   - `docs/V02_OPERATOR_DASHBOARD_SPEC.md`
+- Added 72-hour failure simulation drill plan with evidence table:
+  - `docs/V02_72_HOUR_DRILL_PLAN.md`
 - Updated docs navigation:
   - `docs/INDEX.md`
