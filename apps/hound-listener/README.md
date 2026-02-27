@@ -1,33 +1,32 @@
-# Hound (Phase 1)
+# Hound Listener App
 
-Local-only desktop app for importing and playing audio files.
+Listener desktop app with local playback plus cloud-catalog bridge.
 
-## Run modes
-- `npm run dev:app` (or `npm run start`): launches Electron + preload + Vite. Import works here.
-- `npm run dev:web`: runs Vite in the browser only. `window.Hound` is undefined and Import will not work.
+## Folder Map
 
-## How to Verify Hound Phase 1
-Run:
-- `npm run start`
+- `ui/`: React/Vite listener UI.
+- `electron/`: main/preload/db/analysis runtime.
+- `supabase/`: backend function + migrations.
+- `data/`: local SQLite and runtime data.
 
-Button-by-button checks:
-1) Top bar
-   - Click "Library": stays on Library screen.
-   - Click "Player" with 0 tracks: button is disabled.
-2) Library screen
-   - Click "Import": file picker opens; cancel -> no change.
-   - Select 1-3 files: list populates in import order; titles are filenames; artist is "Unknown Artist".
-   - Click a track row: navigates to Player and starts playback at 0:00.
-   - Click "Clear Library": list clears, playback stops, selectedTrackId resets, Player button disabled.
-3) Player screen (with a selected track)
-   - Prev: if previous exists -> switch + play from 0:00; else restart current from 0:00.
-   - Play/Pause: toggles playback without overlapping audio.
-   - Next: if next exists -> switch + play from 0:00; else stop playback and stay selected.
-   - Stop: stops playback, resets to 0:00, opens recap modal.
-   - Like: toggles liked state; Library row shows "<3".
-   - Flip: switches to Back view; "Back to Front" returns.
-   - Double-click cover: flips to Back view.
-4) Recap modal
-   - "Close": closes modal, stays on Player.
-   - "Go to Library": closes modal and navigates to Library.
+## Run
+
+- `npm run start` / `npm run dev:web`: web-first listener UI.
+- `npm run dev:web`: Browser-only UI (no Electron IPC/import).
+- `npm run build`: Build renderer.
+
+## Web-First Status
+
+Electron runtime and packaging (`dev:app`, `electron`, `pack`, `dist`) are currently disabled.
+They are deferred until Web v1 is stable.
+
+## Env
+
+- `.env`: listener UI env (`VITE_HOUND_API_MODE`, `VITE_HOUND_API_BASE`).
+- `supabase/functions/api-v1`: uses secrets in Supabase project.
+
+## Related Infra
+
+- Worker service: `../hound-worker/`.
+- Ops runbooks: `../../ops/README.md`.
 

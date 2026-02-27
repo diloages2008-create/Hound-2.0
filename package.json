@@ -6,12 +6,18 @@
     "packages/*"
   ],
   "scripts": {
-    "listener:dev": "npm --workspace apps/hound-listener run dev:app",
+    "listener:dev": "npm run listener:web",
     "listener:web": "npm --workspace apps/hound-listener run dev:web",
     "listener:build": "npm --workspace apps/hound-listener run build",
-    "listener:pack": "npm --workspace apps/hound-listener run pack",
-    "listener:dist": "npm --workspace apps/hound-listener run dist",
+    "listener:pack": "node -e \"console.error('listener:pack disabled in web-first mode'); process.exit(1)\"",
+    "listener:dist": "node -e \"console.error('listener:dist disabled in web-first mode'); process.exit(1)\"",
     "studio:dev": "npm --workspace apps/hound-studio run dev",
-    "studio:build": "npm --workspace apps/hound-studio run build"
+    "studio:build": "npm --workspace apps/hound-studio run build",
+    "worker:start": "npm --workspace apps/hound-worker run start",
+    "ops:deploy:v01": "powershell -ExecutionPolicy Bypass -File ./ops/deploy-v01.ps1",
+    "ops:verify:first-release": "powershell -ExecutionPolicy Bypass -File ./ops/verify-first-release.ps1",
+    "domain:test": "npm --workspace packages/domain-types run test",
+    "rules:test": "npm --workspace packages/rules-engine run test",
+    "packages:test": "npm run domain:test && npm run rules:test"
   }
 }

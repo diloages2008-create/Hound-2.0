@@ -7,16 +7,18 @@
     "main":  "electron/main.cjs",
     "scripts":  {
                     "dev:web":  "vite --config ui/vite.config.js",
-        "dev:app":  "powershell -NoProfile -Command \"Start-Process -FilePath npm -ArgumentList 'run','dev:web'; Start-Sleep -Seconds 2; npm run electron\"",
-        "start":  "npm run dev:app",
+        "dev:app":  "node -e \"console.error('dev:app disabled in web-first mode'); process.exit(1)\"",
+        "start":  "npm run dev:web",
                     "build":  "vite build --config ui/vite.config.js",
                     "preview":  "vite preview --config ui/vite.config.js",
-        "electron":  "node ./electron/launch.cjs",
-                    "pack":  "npm run build \u0026\u0026 electron-builder --dir",
-                    "dist":  "npm run build \u0026\u0026 electron-builder --win nsis",
+        "electron":  "node -e \"console.error('electron runtime disabled in web-first mode'); process.exit(1)\"",
+                    "pack":  "node -e \"console.error('pack disabled in web-first mode'); process.exit(1)\"",
+                    "dist":  "node -e \"console.error('dist disabled in web-first mode'); process.exit(1)\"",
                     "den":  "echo admin panel removed"
                 },
     "dependencies":  {
+                         "better-sqlite3": "^9.4.5",
+                         "fft.js": "^4.0.4",
                          "react":  "^18.2.0",
                          "react-dom":  "^18.2.0"
                      },

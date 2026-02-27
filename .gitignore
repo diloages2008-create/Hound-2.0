@@ -2,11 +2,14 @@ node_modules/
 dist/
 ui/dist/
 *.log
-
-.env
+.tmp/
+.tools/
+backups/
 
 .env
 den.env
+.env.local
+.env.*.local
 
 # Electron / build outputs
 apps/**/dist/
@@ -35,5 +38,8 @@ apps/**/electron/ffmpeg/
 
 # Supabase local artifacts
 apps/**/supabase/.temp/
-apps/**/supabase/supabase exe/
+apps/**/supabase/supabase.exe
+
+# Local runtime data
+apps/hound-listener/data/
 

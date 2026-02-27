@@ -1,0 +1,624 @@
+openapi: 3.1.0
+info:
+  title: Hound Backend API
+  version: 1.0.0
+  description: |
+    Canonical v1 API contract for Hound Studio (artist) and Hound Listener (consumer).
+servers:
+  - url: https://api.hound.fm
+security:
+  - bearerAuth: []
+tags:
+  - name: auth
+  - name: studio
+  - name: listener
+paths:
+  /v1/auth/artist/signup:
+    post:
+      tags: [auth]
+      summary: Create artist account and rights attestation
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ArtistSignupRequest'
+      responses:
+        '201':
+          description: Artist account created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArtistAuthResponse'
+  /v1/auth/artist/login:
+    post:
+      tags: [auth]
+      summary: Login artist and return bearer token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ArtistLoginRequest'
+      responses:
+        '200':
+          description: Artist authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArtistLoginResponse'
+  /v1/studio/profile:
+    get:
+      tags: [studio]
+      summary: Fetch artist profile
+      responses:
+        '200':
+          description: Artist profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArtistProfile'
+    put:
+      tags: [studio]
+      summary: Upsert artist profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ArtistProfileUpdateRequest'
+      responses:
+        '200':
+          description: Updated profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArtistProfile'
+  /v1/studio/releases:
+    get:
+      tags: [studio]
+      summary: List artist releases
+      responses:
+        '200':
+          description: Artist releases
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReleaseListResponse'
+    post:
+      tags: [studio]
+      summary: Create draft release (album/single)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateReleaseRequest'
+      responses:
+        '201':
+          description: Draft release created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Release'
+  /v1/studio/releases/{releaseId}/uploads/master-intent:
+    post:
+      tags: [studio]
+      summary: Create signed upload intent for master audio
+      parameters:
+        - $ref: '#/components/parameters/releaseId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MasterUploadIntentRequest'
+      responses:
+        '200':
+          description: Upload intent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadIntentResponse'
+  /v1/studio/releases/{releaseId}/uploads/cover-intent:
+    post:
+      tags: [studio]
+      summary: Create signed upload intent for cover art
+      parameters:
+        - $ref: '#/components/parameters/releaseId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CoverUploadIntentRequest'
+      responses:
+        '200':
+          description: Upload intent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadIntentResponse'
+  /v1/studio/releases/{releaseId}/submit:
+    post:
+      tags: [studio]
+      summary: Submit release for transcode and curation
+      parameters:
+        - $ref: '#/components/parameters/releaseId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmitReleaseRequest'
+      responses:
+        '200':
+          description: Release pipeline accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Release'
+  /v1/listener/home:
+    get:
+      tags: [listener]
+      summary: Fetch listener home rails
+      responses:
+        '200':
+          description: Home payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListenerHomeResponse'
+  /v1/listener/albums/{albumId}:
+    get:
+      tags: [listener]
+      summary: Fetch album detail view
+      parameters:
+        - $ref: '#/components/parameters/albumId'
+      responses:
+        '200':
+          description: Album detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlbumDetailResponse'
+  /v1/listener/tracks/{trackId}/stream:
+    get:
+      tags: [listener]
+      summary: Resolve track stream manifest URL
+      parameters:
+        - $ref: '#/components/parameters/trackId'
+      responses:
+        '200':
+          description: Stream manifest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StreamManifestResponse'
+  /v1/listener/telemetry/plays:
+    post:
+      tags: [listener]
+      summary: Ingest play telemetry events in batch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlayTelemetryBatchRequest'
+      responses:
+        '202':
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AcceptedResponse'
+  /v1/listener/albums/{albumId}/suggested-next:
+    get:
+      tags: [listener]
+      summary: Fetch lightweight suggested next albums
+      parameters:
+        - $ref: '#/components/parameters/albumId'
+      responses:
+        '200':
+          description: Suggested next
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuggestedAlbumsResponse'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    releaseId:
+      name: releaseId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    albumId:
+      name: albumId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    trackId:
+      name: trackId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  schemas:
+    ArtistSignupRequest:
+      type: object
+      required: [email, password, stageName, ownsMasters]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 8
+        stageName:
+          type: string
+          minLength: 1
+        ownsMasters:
+          type: boolean
+        rightsStatement:
+          type: string
+    ArtistAuthResponse:
+      type: object
+      required: [accessToken, userId, artistId]
+      properties:
+        accessToken:
+          type: string
+        userId:
+          type: string
+          format: uuid
+        artistId:
+          type: string
+          format: uuid
+    ArtistLoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 8
+    ArtistLoginResponse:
+      type: object
+      required: [accessToken, userId]
+      properties:
+        accessToken:
+          type: string
+        userId:
+          type: string
+          format: uuid
+        artistId:
+          type: string
+          format: uuid
+          nullable: true
+    ArtistProfile:
+      type: object
+      required: [artistId, stageName, bio, influences, credits, socials]
+      properties:
+        artistId:
+          type: string
+          format: uuid
+        stageName:
+          type: string
+        bio:
+          type: string
+        influences:
+          type: array
+          items:
+            type: string
+        credits:
+          type: array
+          items:
+            type: string
+        socials:
+          type: object
+          additionalProperties:
+            type: string
+    ArtistProfileUpdateRequest:
+      type: object
+      properties:
+        stageName:
+          type: string
+        bio:
+          type: string
+        influences:
+          type: array
+          items:
+            type: string
+        credits:
+          type: array
+          items:
+            type: string
+        socials:
+          type: object
+          additionalProperties:
+            type: string
+    CreateReleaseRequest:
+      type: object
+      required: [title, releaseType, genre]
+      properties:
+        title:
+          type: string
+        releaseType:
+          type: string
+          enum: [album, ep, single]
+        genre:
+          type: string
+        moodTags:
+          type: array
+          items:
+            type: string
+        about:
+          type: string
+        releaseDate:
+          type: string
+          format: date
+    Release:
+      type: object
+      required: [releaseId, artistId, title, status]
+      properties:
+        releaseId:
+          type: string
+          format: uuid
+        artistId:
+          type: string
+          format: uuid
+        title:
+          type: string
+        status:
+          type: string
+          enum: [draft, submitted, in_transcode, live, rejected]
+        genre:
+          type: string
+        moodTags:
+          type: array
+          items:
+            type: string
+    ReleaseListResponse:
+      type: object
+      required: [releases]
+      properties:
+        releases:
+          type: array
+          items:
+            $ref: '#/components/schemas/Release'
+    MasterUploadIntentRequest:
+      type: object
+      required: [trackId, fileName, contentType]
+      properties:
+        trackId:
+          type: string
+          format: uuid
+        fileName:
+          type: string
+        contentType:
+          type: string
+          enum: [audio/wav, audio/flac, audio/aiff]
+    CoverUploadIntentRequest:
+      type: object
+      required: [fileName, contentType]
+      properties:
+        fileName:
+          type: string
+        contentType:
+          type: string
+          enum: [image/jpeg, image/png, image/webp]
+    UploadIntentResponse:
+      type: object
+      required: [assetId, uploadUrl, publicPath, expiresAt]
+      properties:
+        assetId:
+          type: string
+          format: uuid
+        uploadUrl:
+          type: string
+          format: uri
+        publicPath:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+    SubmitReleaseRequest:
+      type: object
+      required: [tracks]
+      properties:
+        tracks:
+          type: array
+          items:
+            $ref: '#/components/schemas/TrackSubmission'
+        coverAssetId:
+          type: string
+          format: uuid
+    TrackSubmission:
+      type: object
+      required: [trackId, title, trackNumber, credits]
+      properties:
+        trackId:
+          type: string
+          format: uuid
+        title:
+          type: string
+        trackNumber:
+          type: integer
+          minimum: 1
+        lyrics:
+          type: string
+        credits:
+          type: array
+          items:
+            $ref: '#/components/schemas/TrackCredit'
+    TrackCredit:
+      type: object
+      required: [personName, role]
+      properties:
+        personName:
+          type: string
+        role:
+          type: string
+    ListenerHomeResponse:
+      type: object
+      required: [featuredAlbum, featuredArtist, rails]
+      properties:
+        featuredAlbum:
+          $ref: '#/components/schemas/AlbumCard'
+        featuredArtist:
+          type: object
+          required: [artistId, stageName]
+          properties:
+            artistId:
+              type: string
+              format: uuid
+            stageName:
+              type: string
+        rails:
+          type: array
+          items:
+            $ref: '#/components/schemas/HomeRail'
+    HomeRail:
+      type: object
+      required: [key, title, albums]
+      properties:
+        key:
+          type: string
+        title:
+          type: string
+        albums:
+          type: array
+          items:
+            $ref: '#/components/schemas/AlbumCard'
+    AlbumCard:
+      type: object
+      required: [albumId, title, artistName, coverUrl]
+      properties:
+        albumId:
+          type: string
+          format: uuid
+        title:
+          type: string
+        artistName:
+          type: string
+        coverUrl:
+          type: string
+          format: uri
+        genre:
+          type: string
+        moodTags:
+          type: array
+          items:
+            type: string
+    AlbumDetailResponse:
+      type: object
+      required: [album, tracks, credits]
+      properties:
+        album:
+          $ref: '#/components/schemas/AlbumCard'
+        tracks:
+          type: array
+          items:
+            $ref: '#/components/schemas/TrackCard'
+        credits:
+          type: array
+          items:
+            $ref: '#/components/schemas/TrackCredit'
+        about:
+          type: string
+    TrackCard:
+      type: object
+      required: [trackId, title, durationSec]
+      properties:
+        trackId:
+          type: string
+          format: uuid
+        title:
+          type: string
+        durationSec:
+          type: integer
+    StreamManifestResponse:
+      type: object
+      required: [trackId, manifestUrl, expiresAt]
+      properties:
+        trackId:
+          type: string
+          format: uuid
+        manifestUrl:
+          type: string
+          format: uri
+        expiresAt:
+          type: string
+          format: date-time
+    PlayTelemetryBatchRequest:
+      type: object
+      required: [events]
+      properties:
+        events:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/PlayTelemetryEvent'
+    PlayTelemetryEvent:
+      type: object
+      required:
+        - trackId
+        - listenerId
+        - playStartTime
+        - playEndTime
+        - percentListened
+        - skippedEarly
+        - replayedSameSession
+      properties:
+        trackId:
+          type: string
+          format: uuid
+        listenerId:
+          type: string
+          format: uuid
+        playStartTime:
+          type: string
+          format: date-time
+        playEndTime:
+          type: string
+          format: date-time
+        percentListened:
+          type: number
+        skippedEarly:
+          type: boolean
+        replayedSameSession:
+          type: integer
+        completedPlay:
+          type: boolean
+        manualSkip:
+          type: boolean
+        autoAdvance:
+          type: boolean
+    AcceptedResponse:
+      type: object
+      required: [accepted]
+      properties:
+        accepted:
+          type: boolean
+          const: true
+    SuggestedAlbumsResponse:
+      type: object
+      required: [albums]
+      properties:
+        albums:
+          type: array
+          items:
+            $ref: '#/components/schemas/AlbumCard'

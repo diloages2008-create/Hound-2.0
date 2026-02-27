@@ -1,247 +1,212 @@
-Hound Master Capability List (current state)
+# Hound Master Capability List (Merged)
 
-1) Playback Engine
+This file merges the prior capability matrix with `docs/CODEX_HISTORY.md` and is now the primary capability reference.
+Last merged: 2026-02-24.
 
+## Snapshot (Repo Shape)
+- Monorepo with `apps/` and `packages/` workspaces.
+- `apps/hound-listener`: Electron + Vite + React desktop app.
+- `apps/hound-studio`: React web app for artist workflows.
+- `packages/domain-types`: shared contracts + normalization helpers (implemented).
+- `packages/rules-engine`: shared orbit/recommendation rules (implemented).
+- `ops/`: deploy + verification runbooks/scripts for v0.1 backend loop.
+- `docs/`: capability, handoff, and acceptance references.
+
+## Listener App Capabilities
+
+### 1) Playback Engine
 Can
-- Load local audio files via custom protocol (houndfile://).
-- Play / Pause / Next / Previous.
-- Seek with slider.
-- Crossfade between tracks (if enabled in settings state).
-- Loudness normalization per track (analyze + gain).
-- Queue playback (plays queued items first).
-- Resume playback from last session if enabled (stored locally).
+- Load local audio via `houndfile://` protocol.
+- Play, pause, next, previous, seek, stop.
+- Crossfade between tracks (settings-dependent).
+- Apply loudness normalization per track (analysis + gain).
+- Prioritize queue playback when queue exists.
 
 Cannot
-- Stream from network sources.
-- Handle remote URLs.
-- Persist queue across app restarts.
-- Play when Electron protocol is not registered.
+- Stream remote network audio catalogs yet.
+- Handle generic remote URLs as track sources.
 
 Key files
-- apps/hound-listener/ui/src/App.jsx (playback controls, loadAndPlay, handleNext, handlePrev, handleStop)
-- apps/hound-listener/electron/main.cjs (protocol registration)
-- apps/hound-listener/electron/preload.cjs (file open + loudness IPC)
-- apps/hound-listener/ui/index.html (CSP allows houndfile:)
+- `apps/hound-listener/ui/src/App.jsx`
+- `apps/hound-listener/electron/main.cjs`
+- `apps/hound-listener/electron/preload.cjs`
 
-2) Import and Library
-
+### 2) Import and Library
 Can
-- Import local audio files (mp3, wav, m4a, flac, aac, alac, ogg, opus).
-- Maintain a library list in memory.
-- Clear library (resets tracks, stops playback).
-- Display library as a table with Title/Artist/Album/Duration.
-- Hover-only action icons.
+- Import local audio (`mp3`, `wav`, `m4a`, `flac`, `aac`, `alac`, `ogg`, `opus`).
+- Show library in table layout (title/artist/album/duration).
+- Provide context actions and hover actions.
 
 Cannot
-- Store library to disk (beyond localStorage state).
-- Scan folders or watch directories.
-- Batch import beyond file picker.
+- Watch folders continuously.
+- Run automatic folder scans.
 
 Key files
-- apps/hound-listener/ui/src/App.jsx (import, track list, library UI)
-- apps/hound-listener/electron/main.cjs (file dialog IPC)
+- `apps/hound-listener/ui/src/App.jsx`
+- `apps/hound-listener/electron/main.cjs`
 
-3) Rotation and Save Core
-
-Track state fields
-- saved
-- rotation
-- rotationOverride (none | force_on | force_off)
-- rotationScore (0–100)
-- playCountTotal
-- lastPositiveListenAt, lastNegativeListenAt
-- playHistory (last 20 plays)
-
+### 3) Rotation, Save, and Orbit Signals
 Can
-- Save/Unsave tracks manually.
-- Manual rotation override: force on/off.
-- Auto-rotation based on score + thresholds.
-- Block auto-rotation on first listen.
-- Decay rotation on early skips.
-- Rotation popover with Auto / Force On / Force Off.
+- Toggle save/unsave and manual rotation override.
+- Maintain orbit-related track state (rotation/recent/discovery signals).
+- Apply long-term ignore decay and discovery fallback behavior.
 
 Cannot
-- Persist Save/Rotation beyond local storage (no disk or db).
-- Apply long-term ignore decay.
-- Use rotation in autoplay selection (no orbit weighting).
-- Show rotation score (hidden by design).
+- Expose final weighted orbit autoplay behavior as complete v1 policy.
 
 Key files
-- apps/hound-listener/ui/src/App.jsx (rotation logic, save, telemetry, UI)
+- `apps/hound-listener/ui/src/App.jsx`
+- `docs/HANDOFF/GAP_ANALYSIS.md`
 
-4) Telemetry
-
-Collected per play
-- play_start_time
-- play_end_time
-- play_duration_seconds
-- track_total_duration
-- percent_listened
-- skipped_early
-- replayed_same_session
-- completed_play
-- manual_skip / auto_advance
-- timestamp
-
+### 4) Telemetry and Analytics Capture
 Can
-- Track telemetry in memory (playHistory).
-- Use telemetry for rotation scoring.
+- Capture play telemetry per play (listen %, skip timing, completion, replay).
+- Use telemetry in local track state and scoring behavior.
 
 Cannot
-- Export telemetry.
-- Display telemetry or analytics UI.
-- Persist telemetry across restarts.
+- Provide finished external analytics reporting/export pipeline.
 
 Key files
-- apps/hound-listener/ui/src/App.jsx (telemetry capture)
+- `apps/hound-listener/ui/src/App.jsx`
 
-5) Orbits (Rotation, Recent, Discovery)
-
+### 5) Queue, Search, Now Playing, and Shell UI
 Can
-- Compute Recent (based on latest play history).
-- Compute Discovery (tracks never played).
-- Show rows in Home UI.
+- Queue add, reorder, clear, and queue-first playback.
+- Search by track/artist/album views.
+- Use now-playing controls and bottom mini-player.
+- Use custom right-click context menu actions.
 
 Cannot
-- Enforce orbit boundaries in autoplay.
-- Track recent expiration windows or appearance caps.
-- Prevent overlap across orbits.
+- Show final credits/lyrics enriched now-playing experience.
+- Show completed recommendation explanations.
 
 Key files
-- apps/hound-listener/ui/src/App.jsx (home list computation only)
+- `apps/hound-listener/ui/src/App.jsx`
 
-6) Autoplay and Next Track Selection
-
+### 6) Persistence and Analysis Backend (Desktop Local)
 Can
-- If queue exists, plays next queued track.
-- If queue empty, follows current context, shuffle, repeat rules.
-- Stops playback at end if no next item.
+- Persist listener data in SQLite (`apps/hound-listener/data/hound.db`).
+- Store tracks, prefs, orbits, playback events, embeddings, and metrics.
+- Use IPC handlers for library/prefs/events/orbit/analysis workflows.
 
 Cannot
-- Weighted orbit selection.
-- Rotation pool priority.
-- Discovery injection.
+- Sync with a remote production backend by default.
 
 Key files
-- apps/hound-listener/ui/src/App.jsx (handleNext)
+- `apps/hound-listener/electron/db.cjs`
+- `apps/hound-listener/electron/main.cjs`
+- `apps/hound-listener/electron/analysis-worker.cjs`
 
-7) UI Shell
+### 7) Listener Cloud Catalog Bridge (v1 Verification Mode)
+Can
+- Login against cloud auth endpoint and store bearer token locally.
+- Fetch listener home rails from backend API.
+- Fetch album detail from backend API.
+- Resolve track stream manifest URLs from backend API.
+- Run in `mock` mode with deterministic local responses (`VITE_HOUND_API_MODE=mock`) for backend-free verification.
 
-Top Bar
-- Can: menu toggle, page title, settings shortcut.
-- Cannot: back button in UI (keyboard only).
-
-Sidebar
-- Can: icon rail closed (72px), full open (260px).
-- Can: nav shortcuts Ctrl+1..5, Ctrl+B.
-- Cannot: badges or notifications.
-
-Bottom Bar (mini player)
-- Always visible.
-- Shows mini art, title/artist.
-- Play/Pause, Seek, Save, Queue, Volume.
-- Clicking art or text opens Now Playing.
-- Cannot: hide for full screen.
+Cannot
+- Play remote HLS manifests end-to-end in production flow yet (UI bridge currently for verification).
 
 Key files
-- apps/hound-listener/ui/src/App.jsx (styles and layout)
+- `apps/hound-listener/ui/src/App.jsx`
 
-8) Home View
+## Studio App Capabilities (Artist Side)
 
+### 1) Artist Workflow UI (v1)
 Can
-- Continue Listening (recent tracks).
-- In Rotation (rotation tracks).
-- Recently Heard (recent tracks).
-- Something New (unplayed tracks).
-- Tile click plays track.
+- Provide artist-focused shell and navigation.
+- Show Dashboard, Upload, Catalog, and Profile pages.
+- Represent onboarding checks, rights confirmation, and metadata workflows.
+- Keep album-first catalog presentation with visible credits.
+- Support responsive layouts across desktop/mobile widths.
+- Call live backend endpoints for artist signup/login, profile load/update, and release draft creation.
+- Call live backend endpoints for artist signup/login, profile load/update, release list, and release draft creation.
+- Run in `mock` mode with local in-browser persistence (`VITE_HOUND_API_MODE=mock`) for backend-free verification.
 
 Cannot
-- Explain why tracks appear.
-- See all links.
+- Execute full upload-intent + release-submit pipeline from Studio UI yet.
 
-9) Library View
+Key files
+- `apps/hound-studio/src/App.jsx`
+- `apps/hound-studio/src/components/StudioShell.jsx`
+- `apps/hound-studio/src/pages/*.jsx`
+- `apps/hound-studio/src/data/studioData.js`
+- `apps/hound-studio/src/styles.css`
+- `apps/hound-studio/src/lib/apiClient.js`
 
+### 2) Upload Pipeline Representation
 Can
-- Hover-only action icons.
-- Save and Rotation icon (Rotation visible only if in rotation or forced).
-- Right-click context menu.
+- Capture payload shape for master file, cover art, metadata, mood tags, credits, lyrics.
+- Show pipeline stages (integrity check, transcode, storage write, catalog entry) in UI.
 
 Cannot
-- Sort or filter.
-- Multi-select.
+- Perform actual cloud upload/transcode/CDN publish in-app yet.
 
-10) Search View
+Key files
+- `apps/hound-studio/src/pages/Upload.jsx`
 
+## Access Gate and Supabase
 Can
-- Auto-focus input on entry.
-- Tracks / Artists / Albums sections.
-- Track click plays.
-- Artist/Album click opens subviews.
+- Define invite/device/session schema.
+- Run `checkin` and `redeem` edge functions.
+- Run `api-v1` edge function scaffold for Studio/Listener contract endpoints.
+- Apply v1 backend schema migration from `supabase/migrations`.
+- Authenticate protected `api-v1` routes with Supabase JWT Bearer tokens.
+- Serve auth session lifecycle endpoints (`/auth/me`, `/auth/refresh`, `/auth/logout`).
+- Serve ingestion endpoints for upload intents, upload completion, release submit, and publish.
+- Accept idempotent cloud telemetry ingest (`client_event_id` + event log endpoint).
+- Sync cloud save/unsave state endpoint for listener tracks.
+- Enforce release state progression server-side (`draft -> submitted -> in_transcode -> live`, with reject path).
+- Queue transcode jobs at submission time (no simulated completion in submit).
+- Run dedicated transcode worker process (`apps/hound-worker`) with ffmpeg/ffprobe pipeline.
 
 Cannot
-- Show Saved or Rotation badges.
-- Filter by Saved or Rotation.
+- Serve as complete production auth + entitlement + billing layer yet.
+- Return full auth session token directly from signup (login endpoint provides bearer token).
 
-11) Now Playing
+Key files
+- `apps/hound-listener/supabase/schema.sql`
+- `apps/hound-listener/supabase/functions/checkin/index.ts`
+- `apps/hound-listener/supabase/functions/redeem/index.ts`
+- `apps/hound-listener/supabase/functions/api-v1/index.ts`
+- `apps/hound-listener/supabase/migrations/20260224_000001_backend_v1.sql`
 
+## Shared Packages (Implemented)
+
+### 1) `@hound/domain-types`
 Can
-- Big art, title, artist–album line.
-- Transport controls.
-- Seek bar.
-- Save + Rotation + Queue icons.
-- Rotation popover.
+- Provide shared orbit and rotation constants.
+- Normalize track objects into a stable contract.
+- Validate telemetry payload key presence.
+- Export helpers (`clamp`, `toISO`) for shared use.
 
-Cannot
-- Lyrics or credits.
-- Expanded back side.
+Key files
+- `packages/domain-types/index.cjs`
+- `packages/domain-types/index.mjs`
+- `packages/domain-types/tests/domain-types.test.cjs`
 
-12) Queue View
-
+### 2) `@hound/rules-engine`
 Can
-- Clear queue.
-- Drag reorder.
-- Click queued track to play.
+- Score tracks from telemetry and policy values.
+- Build orbit pools (`rotation`, `recent`, `discovery`) from shared contracts.
+- Select next track with queue-first, then orbit-priority logic.
+- Suggest next albums from shared tags + listener behavior signals.
 
-Cannot
-- Persist queue.
-- Show upcoming autoplay tracks.
+Key files
+- `packages/rules-engine/index.cjs`
+- `packages/rules-engine/index.mjs`
+- `packages/rules-engine/tests/rules-engine.test.cjs`
 
-13) Context Menu
+## Confirmed Gaps / Not Built Yet
+- Listener native HLS playback robustness across all targets (current implementation supports remote URL playback; full production HLS compatibility still needs wider client/device validation).
+- Full bucket policy hardening and operational SLO/alerts (core live flow now works).
+- Final recommendation weighting and advanced recommendation system.
+- Full policy hardening (rate limits, stricter row-level policies, abuse controls) for `api-v1`.
 
-Can
-- Custom right-click menu on tracks.
-- Play / Add to Queue / Save or Unsave / Rotation submenu.
-
-Cannot
-- Remove from library.
-- Not interested.
-
-14) Settings
-
-Can
-- Account/Storage/Advanced sections.
-- Show Advanced toggle (currently only shows a placeholder line).
-
-Cannot
-- Audio device selection.
-- Import path management.
-- Rotation score debug display (hidden).
-
-15) Performance and Animations
-
-Can
-- Static UI (no marquee, no loading pulse).
-- Removed animation loops to reduce lag.
-
-Cannot
-- Smooth marquee text (intentionally disabled).
-
-16) Protocols and Platform
-
-Protocols
-- houndfile:// (local audio)
-- http://localhost:5173 and ws://localhost:5173 (dev server)
-- https://rbhlvbutqzgqogsrqwet.supabase.co (gate, disabled)
-
-Cannot
-- Play audio without Electron scheme registration.
+## Next Work Targets
+1) Move worker from local process to dedicated always-on runtime (container/hosted worker).
+2) Add monitoring/alerts for transcode failures and publish readiness errors.
+3) Run listener playback validation on target devices/networks for HLS robustness.
+4) Add integration tests that consume shared packages and live API contracts from app code paths.
+5) Add policy hardening (RLS, quotas, and abuse protections) for production rollout.

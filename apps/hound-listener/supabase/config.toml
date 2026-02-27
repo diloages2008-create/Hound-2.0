@@ -1,0 +1,10 @@
+project_id = "rbhlvbutqzgqogsrqwet"
+
+[functions.api-v1]
+verify_jwt = false
+
+[functions.checkin]
+verify_jwt = false
+
+[functions.redeem]
+verify_jwt = false

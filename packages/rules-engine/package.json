@@ -1,6 +1,19 @@
 {
   "name": "@hound/rules-engine",
   "private": true,
-  "version": "0.0.0",
-  "main": "index.js"
+  "version": "0.1.0",
+  "main": "./index.cjs",
+  "module": "./index.mjs",
+  "exports": {
+    ".": {
+      "require": "./index.cjs",
+      "import": "./index.mjs"
+    }
+  },
+  "scripts": {
+    "test": "node --test tests"
+  },
+  "dependencies": {
+    "@hound/domain-types": "*"
+  }
 }

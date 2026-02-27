@@ -1,14 +1,27 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { mockListenerRequest } from "./mockCloudApi.js";
 
 // Track shape contract:
 // Track {
-//   id: string, path: string, title: string, artist: string,
+//   id: string, path: string, title: string, artist: string, album: string | null,
+//   durationSec: number | null,
 //   rotation: boolean, rotationManual: null | boolean, saved: boolean,
 //   rotationScore: number, lastPositiveListenAt: string | null,
 //   lastNegativeListenAt: string | null,
 //   rotationOverride: "none" | "force_on" | "force_off",
 //   playCountTotal: number,
-//   playHistory: Array<PlayTelemetry>
+//   playHistory: Array<PlayTelemetry>,
+//   analysisStatus: "pending" | "queued" | "in_progress" | "complete" | "error",
+//   loudnessLUFS: number | null,
+//   gain: number,
+//   loudnessReady: boolean,
+//   bpm: number | null,
+//   key: string | null,
+//   mode: string | null,
+//   orbit: "rotation" | "recent" | "discovery" | null,
+//   evidenceScore: number,
+//   forceOn: boolean,
+//   forceOff: boolean
 // }
 
 // PlayTelemetry contract:
@@ -160,6 +173,13 @@ const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFz
 const GATE_BASE = `${SUPABASE_URL}/functions/v1`;
 const REDEEM_URL = `${GATE_BASE}/redeem`;
 const CHECKIN_URL = `${GATE_BASE}/checkin`;
+const API_V1_BASE =
+  (typeof import.meta !== "undefined" && import.meta.env?.VITE_HOUND_API_BASE) ||
+  `${GATE_BASE}/api-v1`;
+const API_MODE =
+  (typeof import.meta !== "undefined" && import.meta.env?.VITE_HOUND_API_MODE) || "live";
+const CLOUD_TOKEN_KEY = "hound_listener_token";
+const CLOUD_REFRESH_KEY = "hound_listener_refresh_token";
 
 const styles = {
   app: {
@@ -848,6 +868,30 @@ const styles = {
     color: "#9ca3af",
     padding: "2px 6px",
     borderRadius: "999px"
+  },
+  hudPanel: {
+    position: "fixed",
+    right: "12px",
+    bottom: "84px",
+    width: "320px",
+    background: "#0f172a",
+    border: "1px solid #1f2937",
+    borderRadius: "12px",
+    padding: "12px",
+    fontSize: "11px",
+    color: "#e5e7eb",
+    zIndex: 30
+  },
+  hudTitle: {
+    fontSize: "12px",
+    fontWeight: 700,
+    marginBottom: "6px"
+  },
+  hudRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: "8px",
+    padding: "2px 0"
   }
 };
 
@@ -863,6 +907,13 @@ const parseTrackMeta = (filePath) => {
 };
 
 const getAlbumName = () => "Unknown Album";
+
+const computeGainFromLufs = (lufs) => {
+  if (!Number.isFinite(lufs)) return 1;
+  const target = -14;
+  const gainDb = target - lufs;
+  return Math.pow(10, gainDb / 20);
+};
 
 const MarqueeText = ({ text }) => (
   <span className="marquee-static" aria-label={text}>
@@ -909,7 +960,20 @@ const normalizeTrack = (track) => ({
   lastNegativeListenAt: track.lastNegativeListenAt ?? null,
   rotationOverride: track.rotationOverride ?? "none",
   playCountTotal: Number.isFinite(track.playCountTotal) ? track.playCountTotal : 0,
-  playHistory: Array.isArray(track.playHistory) ? track.playHistory : []
+  playHistory: Array.isArray(track.playHistory) ? track.playHistory : [],
+  analysisStatus: track.analysisStatus ?? "pending",
+  loudnessLUFS: Number.isFinite(track.loudnessLUFS) ? track.loudnessLUFS : null,
+  gain: Number.isFinite(track.gain) ? track.gain : 1,
+  loudnessReady: track.loudnessReady ?? false,
+  bpm: Number.isFinite(track.bpm) ? track.bpm : null,
+  key: track.key ?? null,
+  mode: track.mode ?? null,
+  album: track.album ?? null,
+  durationSec: Number.isFinite(track.durationSec) ? track.durationSec : null,
+  orbit: track.orbit ?? null,
+  evidenceScore: Number.isFinite(track.evidenceScore) ? track.evidenceScore : 0,
+  forceOn: !!track.forceOn,
+  forceOff: !!track.forceOff
 });
 
 const useSessionStats = () => {
@@ -966,6 +1030,17 @@ export default function App() {
   const [inviteLabel, setInviteLabel] = useState("");
   const [authError, setAuthError] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
+  const [cloudEmail, setCloudEmail] = useState("");
+  const [cloudPassword, setCloudPassword] = useState("");
+  const [cloudToken, setCloudToken] = useState(() => localStorage.getItem(CLOUD_TOKEN_KEY) || "");
+  const [cloudRefreshToken, setCloudRefreshToken] = useState(() => localStorage.getItem(CLOUD_REFRESH_KEY) || "");
+  const [cloudRole, setCloudRole] = useState(null);
+  const [cloudBusy, setCloudBusy] = useState(false);
+  const [cloudError, setCloudError] = useState("");
+  const [cloudMessage, setCloudMessage] = useState("");
+  const [cloudHome, setCloudHome] = useState(null);
+  const [cloudAlbum, setCloudAlbum] = useState(null);
+  const [cloudStreamInfo, setCloudStreamInfo] = useState(null);
 
   const [screen, setScreen] = useState("home");
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -976,6 +1051,10 @@ export default function App() {
   const [selectedTrackId, setSelectedTrackId] = useState(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [recap, setRecap] = useState(null);
+  const [metrics, setMetrics] = useState(null);
+  const [recommendationCandidates, setRecommendationCandidates] = useState([]);
+  const [recommendationSeedId, setRecommendationSeedId] = useState(null);
+  const [orbitHud, setOrbitHud] = useState(null);
   const [error, setError] = useState("");
   const [importError, setImportError] = useState("");
   const [importing, setImporting] = useState(false);
@@ -1009,6 +1088,7 @@ export default function App() {
     resumeOnLaunch: true,
     stopEndsSession: true
   });
+  const [devMode, setDevMode] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [repeatMode, setRepeatMode] = useState("off");
   const [currentTime, setCurrentTime] = useState(0);
@@ -1016,6 +1096,7 @@ export default function App() {
   const [showRemaining, setShowRemaining] = useState(false);
   const [isSeeking, setIsSeeking] = useState(false);
   const [volume, setVolume] = useState(1);
+  const [isBuffering, setIsBuffering] = useState(false);
   const searchInputRef = useRef(null);
   const navHistoryRef = useRef([]);
   const navSkipRef = useRef(false);
@@ -1037,8 +1118,12 @@ export default function App() {
   const persistTimerRef = useRef(0);
   const pendingSeekRef = useRef(null);
   const pendingNextRef = useRef(null);
-  const loudnessPendingRef = useRef(false);
-  const loudnessQueueRef = useRef([]);
+  const lastRecommendationRef = useRef(null);
+  const playSourceRef = useRef({ source: "library", seedTrackId: null });
+  const recentPlayedRef = useRef([]);
+  const playContextRef = useRef("manual");
+  const cloudEventMilestonesRef = useRef({});
+  const cloudRetryRef = useRef({});
   const session = useSessionStats();
   const sessionPlayCountsRef = useRef({});
   const playStartRef = useRef(null);
@@ -1051,7 +1136,96 @@ export default function App() {
   );
   const selectedTrack = selectedIndex >= 0 ? tracks[selectedIndex] : null;
 
-  const ROTATION_EARN_THRESHOLD = 0.65;
+  useEffect(() => {
+    if (cloudToken) {
+      localStorage.setItem(CLOUD_TOKEN_KEY, cloudToken);
+    } else {
+      localStorage.removeItem(CLOUD_TOKEN_KEY);
+    }
+  }, [cloudToken]);
+
+  useEffect(() => {
+    if (cloudRefreshToken) {
+      localStorage.setItem(CLOUD_REFRESH_KEY, cloudRefreshToken);
+    } else {
+      localStorage.removeItem(CLOUD_REFRESH_KEY);
+    }
+  }, [cloudRefreshToken]);
+
+
+  const refreshTrackFeatures = async (ids) => {
+    const getter = window?.Hound?.getTrackFeatures;
+    if (typeof getter !== "function") return;
+    const results = await Promise.all(ids.map((id) => getter(id)));
+    const map = new Map(results.filter(Boolean).map((item) => [item.trackId, item]));
+    setTracks((prev) =>
+      prev.map((track) => {
+        const feature = map.get(track.id);
+        if (!feature) return track;
+        const lufs = Number.isFinite(feature.loudnessLUFS) ? feature.loudnessLUFS : track.loudnessLUFS;
+        return {
+          ...track,
+          analysisStatus: feature.analysisStatus ?? track.analysisStatus,
+          loudnessLUFS: lufs,
+          gain: computeGainFromLufs(lufs),
+          loudnessReady: Number.isFinite(lufs),
+          bpm: Number.isFinite(feature.bpm) ? feature.bpm : track.bpm,
+          key: feature.key ?? track.key,
+          mode: feature.mode ?? track.mode,
+          durationSec: Number.isFinite(feature.durationSec) ? feature.durationSec : track.durationSec
+        };
+      })
+    );
+  };
+
+  const queueAnalysisForTracks = (list) => {
+    const queue = window?.Hound?.queueAnalysis;
+    if (typeof queue !== "function") return;
+    const payload = list
+      .filter((track) => track && track.id && track.path)
+      .map((track) => ({
+        id: track.id,
+        path: track.path,
+        title: track.title,
+        artist: track.artist,
+        contentHash: track.contentHash,
+        fileSize: track.fileSize,
+        mtimeMs: track.mtimeMs
+      }));
+    if (payload.length > 0) {
+      queue(payload);
+    }
+  };
+
+  const saveLibraryTracks = (list) => {
+    const saver = window?.Hound?.saveLibrary;
+    if (typeof saver !== "function") return;
+    const payload = list
+      .filter((track) => track && track.id && track.path)
+      .map((track) => ({
+        id: track.id,
+        path: track.path,
+        title: track.title,
+        artist: track.artist,
+        album: track.album,
+        durationSec: track.durationSec,
+        contentHash: track.contentHash
+      }));
+    if (payload.length > 0) {
+      saver(payload);
+    }
+  };
+
+  const ORBIT_CONFIG = {
+    qualifiedThreshold: 0.65,
+    earlySkipThreshold: 0.2,
+    promotionQualifiedPlays: 2,
+    demotionSkips: 2,
+    recentDecayDays: 14,
+    discoveryIgnoreDays: 30,
+    cooldownSize: 3
+  };
+  const ROTATION_EARN_THRESHOLD = ORBIT_CONFIG.qualifiedThreshold;
   const ROTATION_DECAY_WINDOW = 5;
   const ROTATION_DECAY_SKIPS = 3;
   const AUTOPLAY_WEIGHTS = {
@@ -1059,7 +1233,7 @@ export default function App() {
     recent: 20,
     discovery: 10
   };
-  const LONG_IGNORED_DAYS = 30;
+  const LONG_IGNORED_DAYS = ORBIT_CONFIG.discoveryIgnoreDays;
 
   function getActiveAudio() {
     return activeAudioRef.current === "A" ? audioARef.current : audioBRef.current;
@@ -1129,6 +1303,99 @@ export default function App() {
       return changed ? next : prev;
     });
   }, []);
+
+  useEffect(() => {
+    const loadLibrary = async () => {
+      const loader = window?.Hound?.loadLibrary;
+      if (typeof loader !== "function") return;
+      const items = await loader();
+      if (!Array.isArray(items)) return;
+      const normalized = items.map((track) => {
+        if (!track || !track.path) return track;
+        const base = track.title ? track : { ...track, ...parseTrackMeta(track.path) };
+        const override = track.forceOn ? "force_on" : track.forceOff ? "force_off" : "none";
+        const orbit = track.orbit || (track.forceOn ? "rotation" : "discovery");
+        return normalizeTrack({
+          ...base,
+          gain: 1,
+          loudnessReady: false,
+          analysisStatus: "pending",
+          rotationOverride: override,
+          rotation: orbit === "rotation",
+          forceOn: !!track.forceOn,
+          forceOff: !!track.forceOff,
+          orbit
+        });
+      });
+      setTracks(normalized.filter(Boolean));
+      const ids = normalized.map((track) => track?.id).filter(Boolean);
+      if (ids.length > 0) {
+        refreshTrackFeatures(ids);
+        queueAnalysisForTracks(normalized);
+      }
+    };
+    loadLibrary();
+  }, []);
+
+  useEffect(() => {
+    const onProgress = (_event, payload) => {
+      if (!payload?.trackId) return;
+      setTracks((prev) =>
+        prev.map((track) =>
+          track.id === payload.trackId
+            ? { ...track, analysisStatus: "in_progress" }
+            : track
+        )
+      );
+    };
+    const onCompleted = (_event, payload) => {
+      if (!payload?.trackId) return;
+      setTracks((prev) =>
+        prev.map((track) => {
+          if (track.id !== payload.trackId) return track;
+          const lufs = Number.isFinite(payload.loudnessLUFS)
+            ? payload.loudnessLUFS
+            : track.loudnessLUFS;
+          return {
+            ...track,
+            analysisStatus: "complete",
+            loudnessLUFS: lufs ?? null,
+            gain: computeGainFromLufs(lufs),
+            loudnessReady: Number.isFinite(lufs)
+          };
+        })
+      );
+      refreshTrackFeatures([payload.trackId]);
+    };
+    const offProgress = window?.Hound?.onAnalysisProgress?.(onProgress);
+    const offCompleted = window?.Hound?.onAnalysisCompleted?.(onCompleted);
+    return () => {
+      offProgress?.();
+      offCompleted?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    const fetchNeighbors = async () => {
+      const getNeighbors = window?.Hound?.getNeighbors;
+      if (!selectedTrackId || typeof getNeighbors !== "function") {
+        setRecommendationCandidates([]);
+        setRecommendationSeedId(null);
+        return;
+      }
+      const results = await getNeighbors(selectedTrackId, 200);
+      setRecommendationCandidates(Array.isArray(results) ? results : []);
+      setRecommendationSeedId(selectedTrackId);
+    };
+    fetchNeighbors();
+  }, [selectedTrackId]);
+
+  useEffect(() => {
+    if (screen !== "settings") return;
+    const getMetrics = window?.Hound?.getRecommendationMetrics;
+    if (typeof getMetrics !== "function") return;
+    getMetrics().then((data) => setMetrics(data));
+  }, [screen]);
 
   useEffect(() => {
     if (navSkipRef.current) {
@@ -1291,48 +1558,6 @@ export default function App() {
 
   useEffect(() => {
     if (!settings.loudnessEnabled) {
-      loudnessQueueRef.current = [];
-      return;
-    }
-    loudnessQueueRef.current = tracks
-      .filter((track) => !track.loudnessReady)
-      .map((track) => track.id);
-  }, [tracks, settings.loudnessEnabled]);
-
-  useEffect(() => {
-    if (loudnessPendingRef.current) return;
-    if (!settings.loudnessEnabled) return;
-    const nextId = loudnessQueueRef.current[0];
-    if (!nextId) return;
-    const track = tracks.find((item) => item.id === nextId);
-    const analyze = window?.Hound?.analyzeLoudness;
-    if (!track || typeof analyze !== "function") return;
-    loudnessPendingRef.current = true;
-    analyze(track.path)
-      .then((result) => {
-        if (!result || typeof result.gainDb !== "number") {
-          return { gainDb: 0 };
-        }
-        return result;
-      })
-      .then((result) => {
-        const gainLinear = Math.pow(10, result.gainDb / 20);
-        setTracks((prev) =>
-          prev.map((item) =>
-            item.id === track.id
-              ? { ...item, gain: gainLinear, loudnessReady: true }
-              : item
-          )
-        );
-      })
-      .finally(() => {
-        loudnessPendingRef.current = false;
-        loudnessQueueRef.current = loudnessQueueRef.current.filter((id) => id !== nextId);
-      });
-  }, [tracks, settings.loudnessEnabled]);
-
-  useEffect(() => {
-    if (!settings.loudnessEnabled) {
       setTracks((prev) =>
         prev.map((track) => ({ ...track, gain: 1, loudnessReady: true }))
       );
@@ -1348,6 +1573,10 @@ export default function App() {
         : 1;
     audio.volume = scaleVolume(baseVolume);
   }, [volume, selectedTrack, settings.loudnessEnabled]);
+
+  useEffect(() => {
+    window?.Hound?.setPlaybackActive?.(isPlaying);
+  }, [isPlaying]);
 
   useEffect(() => {
     if (!settings.resumeOnLaunch) return;
@@ -1393,9 +1622,33 @@ export default function App() {
   };
 
   useEffect(() => {
-    const onError = () => {
+    const onError = async (event) => {
+      const audio = event.currentTarget;
+      const active = getActiveAudio();
+      if (active !== audio) return;
+      const current = selectedTrack;
+      if (current?.remoteUrl && current?.cloudTrackId) {
+        const retries = cloudRetryRef.current[current.id] || 0;
+        if (retries < 1) {
+          cloudRetryRef.current[current.id] = retries + 1;
+          try {
+            const refreshed = await cloudRequest(`/v1/listener/tracks/${current.cloudTrackId}/stream`);
+            setCloudStreamInfo(refreshed);
+            setTracks((prev) =>
+              prev.map((track) =>
+                track.id === current.id ? { ...track, remoteUrl: refreshed.manifestUrl } : track
+              )
+            );
+            loadAndPlay({ ...current, remoteUrl: refreshed.manifestUrl });
+            return;
+          } catch {
+            // fall through to error
+          }
+        }
+      }
       setError("Could not play this file.");
       setIsPlaying(false);
+      setIsBuffering(false);
     };
     const onLoadedMetadata = (event) => {
       const audio = event.currentTarget;
@@ -1419,6 +1672,55 @@ export default function App() {
       if (!isSeeking) {
         setCurrentTime(currentTime);
       }
+
+      const current = selectedTrack;
+      if (cloudToken && current?.cloudTrackId) {
+        const total = Number.isFinite(audio.duration) ? audio.duration : Number(current.durationSec || 0);
+        if (total > 0) {
+          const pct = (currentTime / total) * 100;
+          const marks = cloudEventMilestonesRef.current[current.id] || {};
+          const milestones = [
+            { at: 25, type: "progress_25" },
+            { at: 50, type: "progress_50" },
+            { at: 75, type: "progress_75" },
+            { at: 95, type: "progress_95" }
+          ];
+          milestones.forEach((milestone) => {
+            if (!marks[milestone.type] && pct >= milestone.at) {
+              marks[milestone.type] = true;
+              cloudEventMilestonesRef.current[current.id] = marks;
+              cloudRequest(
+                "/v1/listener/telemetry/events",
+                {
+                  method: "POST",
+                  body: JSON.stringify({
+                    events: [
+                      {
+                        eventId: `${current.cloudTrackId}:${milestone.type}:${Math.floor(Date.now() / 1000)}`,
+                        trackId: current.cloudTrackId,
+                        eventType: milestone.type,
+                        eventTime: new Date().toISOString(),
+                        payload: { percent: milestone.at }
+                      }
+                    ]
+                  })
+                },
+                true
+              ).catch(() => {});
+            }
+          });
+        }
+      }
+    };
+    const onWaiting = (event) => {
+      const audio = event.currentTarget;
+      if (getActiveAudio() !== audio) return;
+      setIsBuffering(true);
+    };
+    const onPlaying = (event) => {
+      const audio = event.currentTarget;
+      if (getActiveAudio() !== audio) return;
+      setIsBuffering(false);
     };
   const onEnded = (event) => {
     const audio = event.currentTarget;
@@ -1435,6 +1737,8 @@ export default function App() {
       audio.addEventListener("loadedmetadata", onLoadedMetadata);
       audio.addEventListener("timeupdate", onTimeUpdate);
       audio.addEventListener("ended", onEnded);
+      audio.addEventListener("waiting", onWaiting);
+      audio.addEventListener("playing", onPlaying);
     });
     return () => {
       audios.forEach((audio) => {
@@ -1442,6 +1746,8 @@ export default function App() {
         audio.removeEventListener("loadedmetadata", onLoadedMetadata);
         audio.removeEventListener("timeupdate", onTimeUpdate);
         audio.removeEventListener("ended", onEnded);
+        audio.removeEventListener("waiting", onWaiting);
+        audio.removeEventListener("playing", onPlaying);
       });
     };
   }, [
@@ -1451,7 +1757,9 @@ export default function App() {
     selectedIndex,
     tracks.length,
     settings.crossfadeEnabled,
-    settings.gapSeconds
+    settings.gapSeconds,
+    cloudToken,
+    selectedTrack
   ]);
 
   useEffect(() => {
@@ -1523,6 +1831,12 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   });
 
+  const getTrackPlaybackSrc = (track) => {
+    if (track?.remoteUrl) return track.remoteUrl;
+    const normalized = track.path.replace(/\\/g, "/");
+    const prefixed = normalized.startsWith("/") ? normalized : `/${normalized}`;
+    return `houndfile://${encodeURI(prefixed)}`;
+  };
 
   const loadAndPlay = (track) => {
     if (!track) return;
@@ -1532,9 +1846,7 @@ export default function App() {
     }
     const audio = getActiveAudio();
     if (!audio) return;
-    const normalized = track.path.replace(/\\/g, "/");
-    const prefixed = normalized.startsWith("/") ? normalized : `/${normalized}`;
-    const src = `Houndfile://${encodeURI(prefixed)}`;
+    const src = getTrackPlaybackSrc(track);
     stopAllAudio();
     // Signal chain: per-track LUFS gain -> session envelope (crossfade) -> app volume (unity).
     const baseVolume = settings.loudnessEnabled && Number.isFinite(track.gain) ? track.gain : 1;
@@ -1553,6 +1865,32 @@ export default function App() {
       trackId: track.id,
       play_start_time: new Date().toISOString()
     };
+    if (track.cloudTrackId && cloudToken) {
+      cloudEventMilestonesRef.current[track.id] = {};
+      const eventTime = new Date().toISOString();
+      cloudRequest(
+        "/v1/listener/telemetry/events",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            events: [
+              {
+                eventId: `${track.cloudTrackId}:play_start:${Math.floor(Date.now() / 1000)}`,
+                trackId: track.cloudTrackId,
+                eventType: "play_start",
+                eventTime,
+                payload: { source: playContextRef.current || "manual" }
+              }
+            ]
+          })
+        },
+        true
+      ).catch(() => {});
+    }
+    recentPlayedRef.current = [
+      track.id,
+      ...recentPlayedRef.current.filter((id) => id !== track.id)
+    ].slice(0, 5);
     setLastSession((prev) => ({
       ...prev,
       lastTrackId: track.id,
@@ -1580,9 +1918,7 @@ export default function App() {
     const nextGainRaw =
       settings.loudnessEnabled && Number.isFinite(nextTrack.gain) ? nextTrack.gain : 1;
     const nextGain = scaleVolume(nextGainRaw);
-    const normalized = nextTrack.path.replace(/\\/g, "/");
-    const prefixed = normalized.startsWith("/") ? normalized : `/${normalized}`;
-    const src = `Houndfile://${encodeURI(prefixed)}`;
+    const src = getTrackPlaybackSrc(nextTrack);
     isCrossfadingRef.current = true;
     nextAudio.pause();
     nextAudio.currentTime = 0;
@@ -1678,6 +2014,14 @@ export default function App() {
     const { openPlayer = false } = options;
     if (selectedTrack && tracks[index].id !== selectedTrack.id) {
       finalizePlay({ manualSkip: true, autoAdvance: false });
+    }
+    if (lastRecommendationRef.current?.recommendedTrackId === tracks[index].id) {
+      playSourceRef.current = {
+        source: "recommendation",
+        seedTrackId: lastRecommendationRef.current.seedTrackId
+      };
+    } else {
+      playSourceRef.current = { source: "library", seedTrackId: null };
     }
     setSelectedTrackId(tracks[index].id);
     if (openPlayer) {
@@ -1833,70 +2177,179 @@ export default function App() {
 
   const isAutoplayEnabled = () => repeatMode !== "off" || shuffleOn;
 
-  const selectNextTrack = ({ currentTrack, library, playbackContext: context }) => {
+  const keyIndex = (key) => {
+    const map = {
+      C: 0,
+      "C#": 1,
+      D: 2,
+      "D#": 3,
+      E: 4,
+      F: 5,
+      "F#": 6,
+      G: 7,
+      "G#": 8,
+      A: 9,
+      "A#": 10,
+      B: 11
+    };
+    return key in map ? map[key] : null;
+  };
+
+  const keyDistance = (a, b) => {
+    const ai = keyIndex(a);
+    const bi = keyIndex(b);
+    if (ai === null || bi === null) return null;
+    const diff = Math.abs(ai - bi);
+    return Math.min(diff, 12 - diff);
+  };
+
+  const getOrbit = (track) => {
     const now = Date.now();
-    const orbitBuckets = { rotation: [], recent: [], discovery: [] };
-    const meaningfulThreshold = ROTATION_EARN_THRESHOLD;
-    const effectiveContext = context || playbackContext;
+    const lastPlay = track.playHistory?.[0];
+    const inRotation = track.rotationOverride === "force_on" || track.rotation === true;
+    const inRecent =
+      lastPlay && lastPlay.percent_listened >= ROTATION_EARN_THRESHOLD && !lastPlay.skipped_early;
+    if (inRotation) return "rotation";
+    if (inRecent) return "recent";
+    if ((track.playCountTotal || 0) === 0) return "discovery";
+    if (track.saved) return "recent";
+    const lastPositive = track.lastPositiveListenAt
+      ? Date.parse(track.lastPositiveListenAt)
+      : null;
+    const cutoffMs = LONG_IGNORED_DAYS * 24 * 60 * 60 * 1000;
+    if (Number.isFinite(lastPositive) && now - lastPositive >= cutoffMs) {
+      return "discovery";
+    }
+    return "recent";
+  };
 
-    const inRotation = (track) =>
-      track.rotationOverride === "force_on" || track.rotation === true;
-
-    const inRecent = (track) => {
-      const lastPlay = track.playHistory?.[0];
-      if (!lastPlay) return false;
-      return lastPlay.percent_listened >= meaningfulThreshold && !lastPlay.skipped_early;
-    };
-
-    const isLongIgnored = (track) => {
-      if (track.rotationOverride === "force_on") return false;
-      if (track.saved) return false;
-      if (inRotation(track) || inRecent(track)) return false;
-      const lastPositive = track.lastPositiveListenAt
-        ? Date.parse(track.lastPositiveListenAt)
-        : null;
-      const cutoffMs = LONG_IGNORED_DAYS * 24 * 60 * 60 * 1000;
-      if (Number.isFinite(lastPositive)) {
-        return now - lastPositive >= cutoffMs;
-      }
-      if ((track.playCountTotal || 0) > 0) {
-        const history = Array.isArray(track.playHistory) ? track.playHistory : [];
-        const oldest = history[history.length - 1];
-        const firstPlay = oldest?.play_start_time ? Date.parse(oldest.play_start_time) : null;
-        if (Number.isFinite(firstPlay)) {
-          return now - firstPlay >= cutoffMs;
+  const rankRecommendationPool = (seedTrack, candidates) => {
+    if (!seedTrack || !Array.isArray(candidates)) return [];
+    const seedArtist = seedTrack.artist;
+    return candidates
+      .map((candidate) => {
+        const track = tracks.find((item) => item.id === candidate.trackId);
+        if (!track) return null;
+        if (track.rotationOverride === "force_off") return null;
+        const orbit = getOrbit(track);
+        let score = Number.isFinite(candidate.score) ? candidate.score : 0;
+        if (orbit === "rotation") score += 0.15;
+        if (orbit === "recent") score += 0.1;
+        if (orbit === "discovery") score += 0.05;
+        const lastPlay = track.playHistory?.[0];
+        if (lastPlay?.skipped_early) score -= 0.2;
+        if (lastPlay?.completed_play) score += 0.1;
+        if (seedArtist && track.artist === seedArtist) score -= 0.15;
+        if (Number.isFinite(candidate.bpm) && Number.isFinite(seedTrack.bpm)) {
+          const tempoDiff = Math.abs(candidate.bpm - seedTrack.bpm);
+          score -= Math.min(0.2, tempoDiff / 200);
         }
-      }
-      return false;
-    };
+        const dist = keyDistance(candidate.key, seedTrack.key);
+        if (Number.isFinite(dist)) {
+          score -= (dist / 6) * 0.1;
+        }
+        return { track, score };
+      })
+      .filter(Boolean)
+      .sort((a, b) => b.score - a.score);
+  };
 
-    const inDiscovery = (track) => {
-      if (inRotation(track) || inRecent(track)) return false;
-      if ((track.playCountTotal || 0) === 0) return true;
-      return isLongIgnored(track);
-    };
+  const selectNextTrack = ({ currentTrack }) => {
+    const weights = { ...AUTOPLAY_WEIGHTS };
+    const queuedId = popQueueTrackId();
+    if (queuedId) {
+      const picked = tracks.find((track) => track.id === queuedId) || null;
+      const trace = {
+        currentTrackId: currentTrack?.id ?? null,
+        pickedTrackId: picked?.id ?? null,
+        reason: "queue",
+        rolledOrbit: null,
+        weights,
+        poolSizes: { rotation: 0, recent: 0, discovery: 0 },
+        filtersApplied: { forceOff: 0, cooldownBlocked: 0, artistBlocked: 0 }
+      };
+      setOrbitHud(trace);
+      window?.Hound?.logSelectionTrace?.(trace);
+      return { track: picked, source: "queue", trace };
+    }
+    if (repeatMode === "one" && currentTrack) {
+      const trace = {
+        currentTrackId: currentTrack.id,
+        pickedTrackId: currentTrack.id,
+        reason: "repeat",
+        rolledOrbit: null,
+        weights,
+        poolSizes: { rotation: 0, recent: 0, discovery: 0 },
+        filtersApplied: { forceOff: 0, cooldownBlocked: 0, artistBlocked: 0 }
+      };
+      setOrbitHud(trace);
+      window?.Hound?.logSelectionTrace?.(trace);
+      return { track: currentTrack, source: "repeat", trace };
+    }
+    if (!isAutoplayEnabled()) {
+      const trace = {
+        currentTrackId: currentTrack?.id ?? null,
+        pickedTrackId: null,
+        reason: "autoplay_off",
+        rolledOrbit: null,
+        weights,
+        poolSizes: { rotation: 0, recent: 0, discovery: 0 },
+        filtersApplied: { forceOff: 0, cooldownBlocked: 0, artistBlocked: 0 }
+      };
+      setOrbitHud(trace);
+      window?.Hound?.logSelectionTrace?.(trace);
+      return null;
+    }
 
-    const candidates = Array.isArray(library) ? library : [];
-    candidates.forEach((track) => {
+    const cooldownIds = new Set(recentPlayedRef.current.slice(0, ORBIT_CONFIG.cooldownSize));
+    const buckets = { rotation: [], recent: [], discovery: [] };
+    let forceOffCount = 0;
+    tracks.forEach((track) => {
       if (!track || track.id === currentTrack?.id) return;
-      if (track.rotationOverride === "force_off") return;
-      if (inRotation(track)) {
-        orbitBuckets.rotation.push(track);
-      } else if (inRecent(track)) {
-        orbitBuckets.recent.push(track);
-      } else if (inDiscovery(track)) {
-        orbitBuckets.discovery.push(track);
+      if (track.forceOff) {
+        forceOffCount += 1;
+        return;
       }
+      const orbit = track.forceOn ? "rotation" : track.orbit || "discovery";
+      if (!buckets[orbit]) return;
+      buckets[orbit].push(track);
     });
 
-    const availableOrbits = Object.entries(orbitBuckets).filter(([, items]) => items.length > 0);
-    if (availableOrbits.length === 0) return null;
+    if (currentTrack && recommendationSeedId === currentTrack.id && recommendationCandidates.length > 0) {
+      const discoveryCandidates = recommendationCandidates
+        .map((candidate) => tracks.find((track) => track.id === candidate.trackId))
+        .filter((track) => track && !track.forceOff && track.orbit === "discovery");
+      if (discoveryCandidates.length > 0) {
+        buckets.discovery = discoveryCandidates;
+      }
+    }
+
+    const availableOrbits = Object.entries(buckets).filter(([, items]) => items.length > 0);
+    if (availableOrbits.length === 0) {
+      const trace = {
+        currentTrackId: currentTrack?.id ?? null,
+        pickedTrackId: null,
+        reason: "fallback_none",
+        rolledOrbit: null,
+        weights,
+        poolSizes: {
+          rotation: buckets.rotation.length,
+          recent: buckets.recent.length,
+          discovery: buckets.discovery.length
+        },
+        filtersApplied: { forceOff: forceOffCount, cooldownBlocked: 0, artistBlocked: 0 }
+      };
+      setOrbitHud(trace);
+      window?.Hound?.logSelectionTrace?.(trace);
+      return null;
+    }
 
     const totalWeight = availableOrbits.reduce(
       (sum, [key]) => sum + (AUTOPLAY_WEIGHTS[key] || 0),
       0
     );
     let pick = Math.random() * totalWeight;
+    const rollPercent = totalWeight > 0 ? Math.round((pick / totalWeight) * 100) : 0;
     let chosenOrbit = availableOrbits[0][0];
     for (const [key] of availableOrbits) {
       pick -= AUTOPLAY_WEIGHTS[key] || 0;
@@ -1906,24 +2359,60 @@ export default function App() {
       }
     }
 
-    const bucket = orbitBuckets[chosenOrbit];
-    if (bucket.length === 1) return bucket[0];
-
-    const scored = bucket.map((track) => {
-      let score = 0;
-      if (chosenOrbit === "rotation") {
-        score = Number.isFinite(track.rotationScore) ? track.rotationScore : 0;
-      } else if (chosenOrbit === "recent") {
-        score = track.playHistory?.[0]?.percent_listened || 0;
+    const bucket = buckets[chosenOrbit];
+    const sameArtist = currentTrack?.artist;
+    const withoutCooldown = bucket.filter((track) => !cooldownIds.has(track.id));
+    const withoutArtist = withoutCooldown.filter((track) => track.artist !== sameArtist);
+    const pool = withoutArtist.length > 0 ? withoutArtist : withoutCooldown.length > 0 ? withoutCooldown : bucket;
+    if (pool.length === 0) {
+      const trace = {
+        currentTrackId: currentTrack?.id ?? null,
+        pickedTrackId: null,
+        reason: "fallback_empty_pool",
+        rolledOrbit: chosenOrbit,
+        weights,
+        poolSizes: {
+          rotation: buckets.rotation.length,
+          recent: buckets.recent.length,
+          discovery: buckets.discovery.length
+        },
+        filtersApplied: { forceOff: forceOffCount, cooldownBlocked: 0, artistBlocked: 0 }
+      };
+      setOrbitHud(trace);
+      window?.Hound?.logSelectionTrace?.(trace);
+      return null;
+    }
+    const savedPool = pool.filter((track) => track.saved);
+    const finalPool = savedPool.length > 0 ? savedPool : pool;
+    const chosen = finalPool[Math.floor(Math.random() * finalPool.length)];
+    if (currentTrack && chosen) {
+      lastRecommendationRef.current = {
+        seedTrackId: currentTrack.id,
+        recommendedTrackId: chosen.id
+      };
+    }
+    const cooldownBlocked = bucket.length - withoutCooldown.length;
+    const artistBlocked = withoutCooldown.length - withoutArtist.length;
+    const trace = {
+      currentTrackId: currentTrack?.id ?? null,
+      pickedTrackId: chosen?.id ?? null,
+      reason: `orbit_roll_${rollPercent}%`,
+      rolledOrbit: chosenOrbit,
+      weights,
+      poolSizes: {
+        rotation: buckets.rotation.length,
+        recent: buckets.recent.length,
+        discovery: buckets.discovery.length
+      },
+      filtersApplied: {
+        forceOff: forceOffCount,
+        cooldownBlocked,
+        artistBlocked
       }
-      return { track, score };
-    });
-
-    const maxScore = Math.max(...scored.map((entry) => entry.score));
-    const top = scored.filter((entry) => entry.score === maxScore).map((entry) => entry.track);
-    const savedTop = top.filter((track) => track.saved);
-    const pool = savedTop.length > 0 ? savedTop : top;
-    return pool[Math.floor(Math.random() * pool.length)];
+    };
+    setOrbitHud(trace);
+    window?.Hound?.logSelectionTrace?.(trace);
+    return { track: chosen, source: "autoplay", trace };
   };
 
   const goBack = () => {
@@ -2002,7 +2491,7 @@ export default function App() {
     );
   };
 
-  const finalizePlay = ({ manualSkip, autoAdvance }) => {
+  const finalizePlay = ({ manualSkip, autoAdvance, endReason }) => {
     if (!selectedTrack) return;
     const start = playStartRef.current;
     if (!start || start.trackId !== selectedTrack.id) return;
@@ -2012,8 +2501,11 @@ export default function App() {
     const percent = totalDuration > 0 ? Math.min(listenedSeconds / totalDuration, 1) : 0;
     const completed = percent >= 0.98 || (autoAdvance && percent >= 0.9);
     const skippedEarly = !!manualSkip && percent < ROTATION_EARN_THRESHOLD;
+    const derivedEndReason = endReason
+      || (completed ? "finished" : manualSkip ? "skipped" : autoAdvance ? "next" : "stopped");
     const count = sessionPlayCountsRef.current[selectedTrack.id] || 1;
     const telemetry = {
+      eventId: `${selectedTrack.cloudTrackId || selectedTrack.id}:${start.play_start_time}:${endTime}`,
       play_start_time: start.play_start_time,
       play_end_time: endTime,
       play_duration_seconds: Number(listenedSeconds.toFixed(1)),
@@ -2028,6 +2520,99 @@ export default function App() {
     };
     appendPlayTelemetry(selectedTrack.id, telemetry);
     applyRotationRules(selectedTrack.id, telemetry);
+    const report = window?.Hound?.reportRecommendationSignal;
+    if (typeof report === "function") {
+      const source = playSourceRef.current?.source || "library";
+      const seedTrackId = playSourceRef.current?.seedTrackId || null;
+      report({
+        trackId: selectedTrack.id,
+        seedTrackId,
+        source,
+        signal: completed ? "positive" : skippedEarly ? "negative" : null,
+        earlySkip: skippedEarly,
+        completed,
+        replayed: telemetry.replayed_same_session > 0,
+        regret: source === "recommendation" && skippedEarly && percent < 0.2
+      });
+    }
+    const logEvent = window?.Hound?.logPlaybackEvent;
+    if (typeof logEvent === "function") {
+      logEvent({
+        trackId: selectedTrack.id,
+        startedAt: start.play_start_time,
+        endedAt: endTime,
+        listenedSec: Number(listenedSeconds.toFixed(1)),
+        completionPct: Number(percent.toFixed(3)),
+        endReason: derivedEndReason,
+        context: playContextRef.current
+      }).then((result) => {
+        if (result?.orbit) {
+          setTracks((prev) =>
+            prev.map((track) =>
+              track.id === selectedTrack.id
+                ? {
+                  ...track,
+                  orbit: result.orbit.orbit,
+                  evidenceScore: result.orbit.evidenceScore ?? track.evidenceScore,
+                  lastPositiveListenAt: result.orbit.lastPositiveListenAt ?? track.lastPositiveListenAt,
+                  lastNegativeListenAt: result.orbit.lastNegativeAt ?? track.lastNegativeListenAt,
+                  rotation: result.orbit.orbit === "rotation"
+                }
+                : track
+            )
+          );
+        }
+      });
+    }
+
+    if (cloudToken && selectedTrack.cloudTrackId) {
+      const cloudTrackId = selectedTrack.cloudTrackId;
+      const cloudEventType = completed ? "complete" : skippedEarly ? "skip" : null;
+      if (cloudEventType) {
+        cloudRequest(
+          "/v1/listener/telemetry/events",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              events: [
+                {
+                  eventId: `${cloudTrackId}:${cloudEventType}:${Math.floor(Date.now() / 1000)}`,
+                  trackId: cloudTrackId,
+                  eventType: cloudEventType,
+                  eventTime: endTime,
+                  payload: { percentListened: Number((percent * 100).toFixed(2)) }
+                }
+              ]
+            })
+          },
+          true
+        ).catch(() => {});
+      }
+
+      cloudRequest(
+        "/v1/listener/telemetry/plays",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            events: [
+              {
+                eventId: telemetry.eventId,
+                trackId: cloudTrackId,
+                playStartTime: telemetry.play_start_time,
+                playEndTime: telemetry.play_end_time,
+                percentListened: Number((telemetry.percent_listened * 100).toFixed(2)),
+                skippedEarly: telemetry.skipped_early,
+                replayedSameSession: telemetry.replayed_same_session,
+                completedPlay: telemetry.completed_play,
+                manualSkip: telemetry.manual_skip,
+                autoAdvance: telemetry.auto_advance
+              }
+            ]
+          })
+        },
+        true
+      ).catch(() => {});
+    }
     playStartRef.current = null;
   };
 
@@ -2085,26 +2670,6 @@ export default function App() {
       session.markSkip();
     }
     finalizePlay({ manualSkip: !fromEnded, autoAdvance: fromEnded });
-    const queuedId = popQueueTrackId();
-    if (queuedId) {
-      const queuedIndex = tracks.findIndex((track) => track.id === queuedId);
-      if (queuedIndex >= 0) {
-        setContext({ type: "queue", label: "Queue" });
-        goToTrack(queuedIndex);
-        return;
-      }
-    }
-    if (repeatMode === "one" && selectedTrack) {
-      audio.currentTime = 0;
-      audio
-        .play()
-        .then(() => setIsPlaying(true))
-        .catch(() => {
-          setError("Could not play this file.");
-          setIsPlaying(false);
-        });
-      return;
-    }
     if (playbackContext.type === "queue" && queueRef.current.length === 0) {
       setContext(lastNonQueueContextRef.current);
     }
@@ -2114,24 +2679,52 @@ export default function App() {
       setIsPlaying(false);
       return;
     }
-    if (isAutoplayEnabled()) {
-      const nextTrack = selectNextTrack({
-        currentTrack: selectedTrack,
-        library: tracks,
-        playbackContext
-      });
-      if (nextTrack) {
-        const nextIndex = tracks.findIndex((track) => track.id === nextTrack.id);
+    if (manual) {
+      lastRecommendationRef.current = null;
+      const queuedId = popQueueTrackId();
+      if (queuedId) {
+        playContextRef.current = "queue";
+        const queuedIndex = tracks.findIndex((track) => track.id === queuedId);
+        if (queuedIndex >= 0) {
+          setContext({ type: "queue", label: "Queue" });
+          goToTrack(queuedIndex);
+          return;
+        }
+      }
+      playContextRef.current = "manual";
+      const nextId = getNextInContext();
+      if (nextId) {
+        const nextIndex = tracks.findIndex((track) => track.id === nextId);
         if (nextIndex >= 0) {
           goToTrack(nextIndex);
           return;
         }
       }
-    }
-    if (manual) {
-      const nextId = getNextInContext();
-      if (nextId) {
-        const nextIndex = tracks.findIndex((track) => track.id === nextId);
+    } else {
+      const selection = selectNextTrack({ currentTrack: selectedTrack });
+      if (!selection) {
+        playContextRef.current = "autoplay";
+        return;
+      }
+      if (selection?.track) {
+        if (selection.source === "queue") {
+          playContextRef.current = "queue";
+          setContext({ type: "queue", label: "Queue" });
+        }
+        if (selection.source === "repeat") {
+          playContextRef.current = "autoplay";
+          audio.currentTime = 0;
+          audio
+            .play()
+            .then(() => setIsPlaying(true))
+            .catch(() => {
+              setError("Could not play this file.");
+              setIsPlaying(false);
+            });
+          return;
+        }
+        playContextRef.current = "autoplay";
+        const nextIndex = tracks.findIndex((track) => track.id === selection.track.id);
         if (nextIndex >= 0) {
           goToTrack(nextIndex);
           return;
@@ -2148,7 +2741,7 @@ export default function App() {
       clearTimeout(pendingNextRef.current);
       pendingNextRef.current = null;
     }
-    finalizePlay({ manualSkip: true, autoAdvance: false });
+    finalizePlay({ manualSkip: true, autoAdvance: false, endReason: "stopped" });
     stopAllAudio();
     setCurrentTime(0);
     setIsPlaying(false);
@@ -2186,17 +2779,38 @@ export default function App() {
       if (!Array.isArray(result) || result.length === 0) return;
       setImportError("");
       setTracks((prev) => {
-        const existing = new Set(prev.map((track) => track.path));
+        const existingPaths = new Set(prev.map((track) => track.path));
+        const existingIds = new Set(prev.map((track) => track.id));
         const additions = result
-          .filter((path) => typeof path === "string" && path.trim().length > 0)
-          .filter((path) => !existing.has(path))
-          .map((path) => {
-            const { title, artist } = parseTrackMeta(path);
+          .map((item) => {
+            if (typeof item === "string") {
+              return { path: item, trackId: item };
+            }
+            if (item && typeof item === "object") {
+              return {
+                path: item.path,
+                trackId: item.trackId || item.id || item.contentHash || item.path,
+                contentHash: item.contentHash,
+                fileSize: item.fileSize,
+                mtimeMs: item.mtimeMs
+              };
+            }
+            return null;
+          })
+          .filter((item) => item && typeof item.path === "string" && item.path.trim().length > 0)
+          .filter((item) => !existingPaths.has(item.path) && !existingIds.has(item.trackId))
+          .map((item) => {
+            const { title, artist } = parseTrackMeta(item.path);
             return {
-              id: path,
-              path,
+              id: item.trackId,
+              path: item.path,
               title,
               artist,
+              contentHash: item.contentHash,
+              fileSize: item.fileSize,
+              mtimeMs: item.mtimeMs,
+              album: null,
+              durationSec: null,
               rotation: false,
               rotationManual: null,
               saved: false,
@@ -2207,13 +2821,25 @@ export default function App() {
               playCountTotal: 0,
               playHistory: [],
               gain: 1,
-              loudnessReady: false
+              loudnessReady: false,
+              analysisStatus: "queued",
+              loudnessLUFS: null,
+              bpm: null,
+              key: null,
+              mode: null,
+              orbit: "discovery",
+              evidenceScore: 0,
+              forceOn: false,
+              forceOff: false
             };
           });
         const next = [...prev, ...additions];
         if (selectedTrackId === null && additions.length > 0) {
           setSelectedTrackId(additions[0].id);
         }
+        saveLibraryTracks(next);
+        queueAnalysisForTracks(additions);
+        refreshTrackFeatures(additions.map((track) => track.id));
         return next;
       });
     } finally {
@@ -2262,11 +2888,14 @@ export default function App() {
   };
 
   const clearLibrary = () => {
+    window?.Hound?.clearLibrary?.();
     setTracks([]);
     setSelectedTrackId(null);
     setScreen("library");
     setIsPlaying(false);
     setQueue([]);
+    setRecommendationCandidates([]);
+    setRecommendationSeedId(null);
     setImportError("");
     stopAllAudio();
     setCurrentTime(0);
@@ -2276,6 +2905,8 @@ export default function App() {
   const handleRowClick = (trackId, contextOverride = null) => {
     const index = tracks.findIndex((track) => track.id === trackId);
     if (index === -1) return;
+    lastRecommendationRef.current = null;
+    playContextRef.current = "manual";
     const baseContext = contextOverride || {
       type: "library",
       id: null,
@@ -2298,14 +2929,25 @@ export default function App() {
 
   const toggleRotation = () => {
     if (!selectedTrack) return;
+    const nextForceOn = !selectedTrack.forceOn;
+    const nextForceOff = false;
+    window?.Hound?.updateTrackPrefs?.({
+      trackId: selectedTrack.id,
+      forceOn: nextForceOn,
+      forceOff: nextForceOff,
+      saved: selectedTrack.saved
+    });
     setTracks((prev) =>
       prev.map((track) =>
         track.id === selectedTrack.id
           ? {
             ...track,
-            rotation: !track.rotation,
-            rotationManual: !track.rotation,
-            rotationOverride: !track.rotation ? "force_on" : "force_off"
+            forceOn: nextForceOn,
+            forceOff: nextForceOff,
+            rotation: nextForceOn,
+            rotationManual: true,
+            rotationOverride: nextForceOn ? "force_on" : "none",
+            orbit: nextForceOn ? "rotation" : track.orbit
           }
           : track
       )
@@ -2314,14 +2956,33 @@ export default function App() {
 
   const toggleSave = () => {
     if (!selectedTrack) return;
+    const nextSaved = !selectedTrack.saved;
+    window?.Hound?.updateTrackPrefs?.({
+      trackId: selectedTrack.id,
+      forceOn: selectedTrack.forceOn,
+      forceOff: selectedTrack.forceOff,
+      saved: nextSaved
+    });
     setTracks((prev) =>
       prev.map((track) =>
         track.id === selectedTrack.id ? { ...track, saved: !track.saved } : track
       )
     );
+    syncCloudSave(selectedTrack, nextSaved);
   };
 
   const setRotationOverrideFor = (trackId, override) => {
+    const target = tracks.find((track) => track.id === trackId);
+    const forceOn = override === "force_on";
+    const forceOff = override === "force_off";
+    if (target) {
+      window?.Hound?.updateTrackPrefs?.({
+        trackId,
+        forceOn,
+        forceOff,
+        saved: target.saved
+      });
+    }
     setTracks((prev) =>
       prev.map((track) => {
         if (track.id !== trackId) return track;
@@ -2330,7 +2991,10 @@ export default function App() {
             ...track,
             rotation: true,
             rotationManual: true,
-            rotationOverride: "force_on"
+            rotationOverride: "force_on",
+            forceOn: true,
+            forceOff: false,
+            orbit: "rotation"
           };
         }
         if (override === "force_off") {
@@ -2338,27 +3002,46 @@ export default function App() {
             ...track,
             rotation: false,
             rotationManual: false,
-            rotationOverride: "force_off"
+            rotationOverride: "force_off",
+            forceOn: false,
+            forceOff: true,
+            orbit: "discovery"
           };
         }
         return {
           ...track,
           rotationManual: null,
-          rotationOverride: "none"
+          rotationOverride: "none",
+          forceOn: false,
+          forceOff: false
         };
       })
     );
   };
 
   const toggleRotationFor = (trackId) => {
+    const target = tracks.find((track) => track.id === trackId);
+    const nextForceOn = target ? !target.forceOn : true;
+    const nextForceOff = false;
+    if (target) {
+      window?.Hound?.updateTrackPrefs?.({
+        trackId,
+        forceOn: nextForceOn,
+        forceOff: nextForceOff,
+        saved: target.saved
+      });
+    }
     setTracks((prev) =>
       prev.map((track) =>
         track.id === trackId
           ? {
             ...track,
-            rotation: !track.rotation,
-            rotationManual: !track.rotation,
-            rotationOverride: !track.rotation ? "force_on" : "force_off"
+            forceOn: nextForceOn,
+            forceOff: nextForceOff,
+            rotation: nextForceOn,
+            rotationManual: true,
+            rotationOverride: nextForceOn ? "force_on" : "none",
+            orbit: nextForceOn ? "rotation" : track.orbit
           }
           : track
       )
@@ -2366,11 +3049,23 @@ export default function App() {
   };
 
   const toggleSaveFor = (trackId) => {
+    const target = tracks.find((track) => track.id === trackId);
+    if (target) {
+      window?.Hound?.updateTrackPrefs?.({
+        trackId,
+        forceOn: target.forceOn,
+        forceOff: target.forceOff,
+        saved: !target.saved
+      });
+    }
     setTracks((prev) =>
       prev.map((track) =>
         track.id === trackId ? { ...track, saved: !track.saved } : track
       )
     );
+    if (target) {
+      syncCloudSave(target, !target.saved);
+    }
   };
 
   const openRotationMenu = (trackId, event) => {
@@ -2713,6 +3408,243 @@ export default function App() {
     setEditingPlaylistName("");
   };
 
+  const cloudRequest = async (path, options = {}, requireAuth = false, allowRefresh = true) => {
+    const headers = {
+      "Content-Type": "application/json",
+      ...(options.headers || {})
+    };
+    if (requireAuth) {
+      if (!cloudToken) throw new Error("No cloud token. Login first.");
+      headers.Authorization = `Bearer ${cloudToken}`;
+    }
+    if (API_MODE === "mock") {
+      return mockListenerRequest(path, { ...options, headers });
+    }
+    const response = await fetch(`${API_V1_BASE}${path}`, { ...options, headers });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      if (requireAuth && allowRefresh && response.status === 401 && cloudRefreshToken) {
+        const refreshed = await refreshCloudToken();
+        if (refreshed) {
+          return cloudRequest(path, options, requireAuth, false);
+        }
+      }
+      throw new Error(payload.error || `Cloud request failed (${response.status})`);
+    }
+    return payload;
+  };
+
+  const refreshCloudToken = async () => {
+    if (!cloudRefreshToken) return false;
+    try {
+      const result = await cloudRequest(
+        "/v1/auth/refresh",
+        {
+          method: "POST",
+          body: JSON.stringify({ refreshToken: cloudRefreshToken })
+        },
+        false,
+        false
+      );
+      setCloudToken(result.accessToken || "");
+      setCloudRefreshToken(result.refreshToken || "");
+      return true;
+    } catch {
+      setCloudToken("");
+      setCloudRefreshToken("");
+      setCloudRole(null);
+      return false;
+    }
+  };
+
+  const loadCloudMe = async () => {
+    const me = await cloudRequest("/v1/auth/me", { method: "GET" }, true);
+    setCloudRole(me.role || null);
+    return me;
+  };
+
+  const loginCloud = async () => {
+    setCloudBusy(true);
+    setCloudError("");
+    setCloudMessage("");
+    try {
+      const result = await cloudRequest("/v1/auth/listener/login", {
+        method: "POST",
+        body: JSON.stringify({ email: cloudEmail, password: cloudPassword })
+      });
+      setCloudToken(result.accessToken || "");
+      setCloudRefreshToken(result.refreshToken || "");
+      const me = await loadCloudMe();
+      setCloudMessage(`Cloud login ok (${result.userId})`);
+      if (me?.role) setCloudMessage(`Cloud login ok (${result.userId}, role: ${me.role})`);
+    } catch (err) {
+      setCloudError(err.message);
+    } finally {
+      setCloudBusy(false);
+    }
+  };
+
+  const logoutCloud = async () => {
+    setCloudBusy(true);
+    setCloudError("");
+    setCloudMessage("");
+    try {
+      if (cloudToken) {
+        await cloudRequest("/v1/auth/logout", { method: "POST" }, true, false);
+      }
+      setCloudToken("");
+      setCloudRefreshToken("");
+      setCloudRole(null);
+      setCloudMessage("Cloud session cleared.");
+    } catch (err) {
+      setCloudError(err.message);
+    } finally {
+      setCloudBusy(false);
+    }
+  };
+
+  const loadCloudHome = async () => {
+    setCloudBusy(true);
+    setCloudError("");
+    try {
+      const home = await cloudRequest("/v1/listener/home");
+      setCloudHome(home);
+      setCloudMessage("Loaded cloud home rails.");
+    } catch (err) {
+      setCloudError(err.message);
+    } finally {
+      setCloudBusy(false);
+    }
+  };
+
+  const loadCloudAlbum = async (albumId) => {
+    setCloudBusy(true);
+    setCloudError("");
+    try {
+      const album = await cloudRequest(`/v1/listener/albums/${albumId}`);
+      setCloudAlbum(album);
+      setCloudMessage(`Loaded album: ${album.album?.title || albumId}`);
+    } catch (err) {
+      setCloudError(err.message);
+    } finally {
+      setCloudBusy(false);
+    }
+  };
+
+  const resolveCloudStream = async (trackId) => {
+    setCloudBusy(true);
+    setCloudError("");
+    try {
+      const stream = await cloudRequest(`/v1/listener/tracks/${trackId}/stream`);
+      setCloudStreamInfo(stream);
+      setCloudMessage(`Resolved stream for track ${trackId}`);
+    } catch (err) {
+      setCloudError(err.message);
+    } finally {
+      setCloudBusy(false);
+    }
+  };
+
+  const syncCloudSave = async (track, saved) => {
+    if (!cloudToken || !track?.cloudTrackId) return;
+    try {
+      await cloudRequest(
+        `/v1/listener/tracks/${track.cloudTrackId}/save`,
+        {
+          method: "POST",
+          body: JSON.stringify({ saved })
+        },
+        true
+      );
+    } catch {
+      // best effort sync in v0.1
+    }
+  };
+
+  const upsertCloudTrack = (track, streamUrl = null, albumMeta = null) => {
+    const cloudId = `cloud:${track.trackId}`;
+    const album = albumMeta?.title || cloudAlbum?.album?.title || "Cloud Album";
+    const artist = albumMeta?.artistName || cloudAlbum?.album?.artistName || "Cloud Artist";
+    let finalTrack = null;
+    setTracks((prev) => {
+      const existing = prev.find((item) => item.id === cloudId);
+      const next = {
+        ...(existing || {}),
+        id: cloudId,
+        cloudTrackId: track.trackId,
+        title: track.title || existing?.title || "Cloud Track",
+        artist,
+        album,
+        path: existing?.path || "",
+        remoteUrl: streamUrl || existing?.remoteUrl || null,
+        durationSec: track.durationSec || existing?.durationSec || null,
+        saved: existing?.saved || false,
+        rotation: existing?.rotation || false,
+        rotationOverride: existing?.rotationOverride || "none",
+        rotationScore: existing?.rotationScore || 0,
+        playCountTotal: existing?.playCountTotal || 0,
+        playHistory: Array.isArray(existing?.playHistory) ? existing.playHistory : [],
+        analysisStatus: existing?.analysisStatus || "complete",
+        loudnessLUFS: existing?.loudnessLUFS || null,
+        gain: existing?.gain || 1,
+        loudnessReady: true,
+        forceOn: existing?.forceOn || false,
+        forceOff: existing?.forceOff || false
+      };
+      finalTrack = next;
+      if (existing) {
+        return prev.map((item) => (item.id === cloudId ? next : item));
+      }
+      return [next, ...prev];
+    });
+    return finalTrack;
+  };
+
+  const playCloudTrack = async (track) => {
+    setCloudBusy(true);
+    setCloudError("");
+    try {
+      const stream = await cloudRequest(`/v1/listener/tracks/${track.trackId}/stream`);
+      setCloudStreamInfo(stream);
+      const localTrack = upsertCloudTrack(track, stream.manifestUrl, cloudAlbum?.album || null);
+      if (localTrack) {
+        setContext({ type: "cloud_album", label: `Cloud Album: ${cloudAlbum?.album?.title || "Unknown"}`, trackIds: [localTrack.id] });
+        setSelectedTrackId(localTrack.id);
+        loadAndPlay(localTrack);
+      }
+    } catch (err) {
+      setCloudError(err.message);
+    } finally {
+      setCloudBusy(false);
+    }
+  };
+
+  const queueCloudTrack = async (track) => {
+    setCloudBusy(true);
+    setCloudError("");
+    try {
+      const stream = await cloudRequest(`/v1/listener/tracks/${track.trackId}/stream`);
+      const localTrack = upsertCloudTrack(track, stream.manifestUrl, cloudAlbum?.album || null);
+      if (localTrack) {
+        setQueue((prev) => [...prev, localTrack.id]);
+        setCloudMessage(`Queued remote track: ${track.title}`);
+      }
+    } catch (err) {
+      setCloudError(err.message);
+    } finally {
+      setCloudBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!cloudToken) return;
+    loadCloudMe().catch(() => {
+      setCloudToken("");
+      setCloudRefreshToken("");
+      setCloudRole(null);
+    });
+  }, [cloudToken]);
+
   const activeScreen = screen === "player" ? "player" : "library";
   const activePage =
     screen === "queue"
@@ -2799,6 +3731,27 @@ export default function App() {
     const albumSet = new Set(artistTracks.map((track) => getAlbumName(track)));
     return Array.from(albumSet);
   }, [activeArtist, artistTracks]);
+
+  const selectedStats = useMemo(() => {
+    if (!selectedTrack?.playHistory) {
+      return { qualifiedPlays: 0, earlySkips: 0, replays: 0 };
+    }
+    let qualifiedPlays = 0;
+    let earlySkips = 0;
+    let replays = 0;
+    selectedTrack.playHistory.forEach((entry) => {
+      if (entry.percent_listened >= ORBIT_CONFIG.qualifiedThreshold && !entry.skipped_early) {
+        qualifiedPlays += 1;
+      }
+      if (entry.percent_listened < ORBIT_CONFIG.earlySkipThreshold || entry.play_duration_seconds < 15) {
+        earlySkips += 1;
+      }
+      if (entry.replayed_same_session > 0) {
+        replays += 1;
+      }
+    });
+    return { qualifiedPlays, earlySkips, replays };
+  }, [selectedTrack, ORBIT_CONFIG.qualifiedThreshold, ORBIT_CONFIG.earlySkipThreshold]);
 
   if (!GATE_DISABLED && (authState.status === "unauth" || authState.status === "revoked")) {
     return (
@@ -2952,6 +3905,108 @@ export default function App() {
         <main style={styles.content}>
         {activePage === "home" ? (
           <section style={styles.homePage}>
+            <div style={styles.section}>
+              <div style={styles.sectionTitle}>Cloud Catalog (API v1)</div>
+              <div style={styles.homeCard}>
+                <div style={styles.homeCardTitle}>Mode: {API_MODE} | Endpoint: {API_V1_BASE}</div>
+                <div style={styles.rowArtist}>Session role: {cloudRole || "none"}</div>
+                <div style={styles.homeActions}>
+                  <input
+                    type="email"
+                    value={cloudEmail}
+                    onChange={(event) => setCloudEmail(event.target.value)}
+                    placeholder="artist email"
+                    style={styles.input}
+                  />
+                  <input
+                    type="password"
+                    value={cloudPassword}
+                    onChange={(event) => setCloudPassword(event.target.value)}
+                    placeholder="artist password"
+                    style={styles.input}
+                  />
+                </div>
+                <div style={styles.homeActions}>
+                  <button type="button" style={styles.primaryButton} onClick={loginCloud} disabled={cloudBusy}>
+                    Login
+                  </button>
+                  <button type="button" style={styles.secondaryButton} onClick={loadCloudMe} disabled={cloudBusy || !cloudToken}>
+                    Who Am I
+                  </button>
+                  <button type="button" style={styles.secondaryButton} onClick={loadCloudHome} disabled={cloudBusy}>
+                    Load Home Rails
+                  </button>
+                  <button
+                    type="button"
+                    style={styles.secondaryButton}
+                    onClick={logoutCloud}
+                  >
+                    Logout
+                  </button>
+                </div>
+                {cloudMessage ? <div style={styles.rowArtist}>{cloudMessage}</div> : null}
+                {cloudError ? <div style={styles.errorBanner}>{cloudError}</div> : null}
+                {cloudHome?.rails?.length ? (
+                  <div style={styles.list}>
+                    {cloudHome.rails.map((rail) => (
+                      <div key={rail.key} style={styles.homeCard}>
+                        <div style={styles.homeCardTitle}>{rail.title}</div>
+                        <div style={styles.rowScroll}>
+                          {(rail.albums || []).slice(0, 6).map((album) => (
+                            <div
+                              key={album.albumId}
+                              style={styles.tile}
+                              onClick={() => loadCloudAlbum(album.albumId)}
+                            >
+                              <div style={styles.tileArt}>API</div>
+                              <div style={styles.tileTitle}>{album.title}</div>
+                              <div style={styles.tileArtist}>{album.artistName}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+                {cloudAlbum?.tracks?.length ? (
+                  <div style={styles.homeCard}>
+                    <div style={styles.homeCardTitle}>
+                      Album Detail: {cloudAlbum.album?.title || "Unknown"}
+                    </div>
+                    <ul style={styles.list}>
+                      {cloudAlbum.tracks.slice(0, 8).map((track) => (
+                        <li key={track.trackId} style={styles.row(false)}>
+                          <div style={styles.rowTitle}>
+                            <span>{track.title}</span>
+                            <button
+                              type="button"
+                              style={styles.queueButton}
+                              onClick={() => playCloudTrack(track)}
+                            >
+                              Play Remote
+                            </button>
+                            <button
+                              type="button"
+                              style={styles.queueButton}
+                              onClick={() => queueCloudTrack(track)}
+                            >
+                              Queue Remote
+                            </button>
+                          </div>
+                          <div style={styles.rowArtist}>Track ID: {track.trackId}</div>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+                {cloudStreamInfo?.manifestUrl ? (
+                  <div style={styles.homeCard}>
+                    <div style={styles.homeCardTitle}>Resolved Stream Manifest</div>
+                    <div style={styles.rowArtist}>{cloudStreamInfo.manifestUrl}</div>
+                  </div>
+                ) : null}
+              </div>
+            </div>
             <div style={styles.section}>
               <div style={styles.sectionTitle}>Continue Listening</div>
               <div style={styles.rowScroll}>
@@ -3238,11 +4293,57 @@ export default function App() {
                   onChange={(event) => setShowAdvanced(event.target.checked)}
                 />
               </div>
+              <div style={styles.settingRow}>
+                <span>Dev Mode</span>
+                <input
+                  type="checkbox"
+                  checked={devMode}
+                  onChange={(event) => setDevMode(event.target.checked)}
+                />
+              </div>
               {showAdvanced ? (
-                <div style={styles.settingRow}>
-                  <span>Rotation overrides</span>
-                  <span>Manual only</span>
-                </div>
+                <>
+                  <div style={styles.settingRow}>
+                    <span>Rotation overrides</span>
+                    <span>Manual only</span>
+                  </div>
+                  {metrics ? (
+                    <>
+                      <div style={styles.settingRow}>
+                        <span>Rec skip rate</span>
+                        <span>
+                          {metrics.totalPlays
+                            ? `${Math.round((metrics.earlySkips / metrics.totalPlays) * 100)}%`
+                            : "—"}
+                        </span>
+                      </div>
+                      <div style={styles.settingRow}>
+                        <span>Rec completion</span>
+                        <span>
+                          {metrics.totalPlays
+                            ? `${Math.round((metrics.completions / metrics.totalPlays) * 100)}%`
+                            : "—"}
+                        </span>
+                      </div>
+                      <div style={styles.settingRow}>
+                        <span>Rec replay</span>
+                        <span>
+                          {metrics.totalPlays
+                            ? `${Math.round((metrics.replays / metrics.totalPlays) * 100)}%`
+                            : "—"}
+                        </span>
+                      </div>
+                      <div style={styles.settingRow}>
+                        <span>Rec regret</span>
+                        <span>
+                          {metrics.totalPlays
+                            ? `${Math.round((metrics.regrets / metrics.totalPlays) * 100)}%`
+                            : "—"}
+                        </span>
+                      </div>
+                    </>
+                  ) : null}
+                </>
               ) : null}
             </div>
           </section>
@@ -3702,6 +4803,7 @@ export default function App() {
                     </p>
                   </div>
                   {error ? <div style={styles.errorBanner}>{error}</div> : null}
+                  {isBuffering ? <div style={styles.rowArtist}>Buffering stream...</div> : null}
                   <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                     <input
                       type="range"
@@ -4052,6 +5154,98 @@ export default function App() {
               </button>
             </div>
           </div>
+        </div>
+      ) : null}
+
+      {devMode && orbitHud ? (
+        <div style={styles.hudPanel}>
+          <div style={styles.hudTitle}>Orbit HUD</div>
+          {(() => {
+            const picked = tracks.find((track) => track.id === orbitHud.pickedTrackId);
+            const cooldownBlocked = orbitHud.filtersApplied?.cooldownBlocked ?? 0;
+            const artistBlocked = orbitHud.filtersApplied?.artistBlocked ?? 0;
+            return (
+              <>
+          <div style={styles.hudRow}>
+            <span>Current</span>
+            <span>{selectedTrack?.title || "None"}</span>
+          </div>
+          <div style={styles.hudRow}>
+            <span>Next Pick</span>
+            <span>
+              {picked?.title || "—"}
+            </span>
+          </div>
+          <div style={styles.hudRow}>
+            <span>Orbit</span>
+            <span>{selectedTrack?.orbit || "unknown"}</span>
+          </div>
+          <div style={styles.hudRow}>
+            <span>Evidence</span>
+            <span>{selectedTrack?.evidenceScore ?? 0}</span>
+          </div>
+          <div style={styles.hudRow}>
+            <span>Last Positive</span>
+            <span>{selectedTrack?.lastPositiveListenAt || "—"}</span>
+          </div>
+          <div style={styles.hudRow}>
+            <span>Qualified</span>
+            <span>{selectedStats.qualifiedPlays}</span>
+          </div>
+          <div style={styles.hudRow}>
+            <span>Early Skips</span>
+            <span>{selectedStats.earlySkips}</span>
+          </div>
+          <div style={styles.hudRow}>
+            <span>Replays</span>
+            <span>{selectedStats.replays}</span>
+          </div>
+          <div style={styles.hudRow}>
+            <span>Force</span>
+            <span>{selectedTrack?.forceOn ? "on" : selectedTrack?.forceOff ? "off" : "none"}</span>
+          </div>
+          <div style={styles.hudRow}>
+            <span>Saved</span>
+            <span>{selectedTrack?.saved ? "yes" : "no"}</span>
+          </div>
+          <div style={styles.hudRow}>
+            <span>Selection</span>
+            <span>{orbitHud.reason || "—"}</span>
+          </div>
+          <div style={styles.hudRow}>
+            <span>Rolled Orbit</span>
+            <span>{orbitHud.rolledOrbit || "—"}</span>
+          </div>
+          <div style={styles.hudRow}>
+            <span>Pools</span>
+            <span>
+              R:{orbitHud.poolSizes?.rotation ?? 0} | Re:{orbitHud.poolSizes?.recent ?? 0} | D:
+              {orbitHud.poolSizes?.discovery ?? 0}
+            </span>
+          </div>
+          <div style={styles.hudRow}>
+            <span>Cooldown Blocked</span>
+            <span>{cooldownBlocked ? `yes (${cooldownBlocked})` : "no"}</span>
+          </div>
+          <div style={styles.hudRow}>
+            <span>Artist Blocked</span>
+            <span>{artistBlocked ? `yes (${artistBlocked})` : "no"}</span>
+          </div>
+          <div style={styles.hudRow}>
+            <span>ForceOff Filter</span>
+            <span>{orbitHud.filtersApplied?.forceOff ?? 0}</span>
+          </div>
+          <div style={styles.hudRow}>
+            <span>Next Orbit</span>
+            <span>{picked?.orbit || "—"}</span>
+          </div>
+          <div style={styles.hudRow}>
+            <span>Next Force</span>
+            <span>{picked?.forceOn ? "on" : picked?.forceOff ? "off" : "none"}</span>
+          </div>
+              </>
+            );
+          })()}
         </div>
       ) : null}
 
