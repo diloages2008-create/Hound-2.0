@@ -4,10 +4,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg ca-certi
 
 WORKDIR /app
 
-COPY apps/hound-worker/package.json ./
+COPY package.json ./
 
 RUN npm install --omit=dev
 
-COPY apps/hound-worker/src ./src
+COPY src ./src
 
 CMD ["npm", "run", "start"]
