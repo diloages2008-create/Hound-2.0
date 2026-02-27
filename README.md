@@ -41,6 +41,12 @@ See `ops/README.md` for copy/paste usage.
 Electron runtime and packaging scripts are intentionally disabled for now.
 Desktop packaging is deferred until Web v1 stability is complete.
 
+## Vercel Monorepo Setup
+
+- Studio project Root Directory: `apps/hound-studio`
+- Listener web project Root Directory: `apps/hound-listener/ui`
+- Each app has its own `vercel.json` in that directory.
+
 ## Local Secrets
 
 - Keep real secret files outside the repo at:

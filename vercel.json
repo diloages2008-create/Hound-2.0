@@ -1,5 +1,0 @@
-{
-  "installCommand": "npm --prefix apps/hound-listener/ui install",
-  "buildCommand": "npm --prefix apps/hound-listener/ui run build",
-  "outputDirectory": "apps/hound-listener/ui/dist"
-}
