@@ -1,0 +1,24 @@
+services:
+  - type: worker
+    name: hound-worker-prod
+    env: docker
+    dockerfilePath: ./apps/hound-worker/Dockerfile
+    dockerContext: .
+    autoDeploy: false
+    envVars:
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: STORAGE_BUCKET_MASTERS
+        value: hound-masters
+      - key: STORAGE_BUCKET_STREAMS
+        value: hound-streams
+      - key: WORKER_CONCURRENCY
+        value: "1"
+      - key: WORKER_POLL_MS
+        value: "3000"
+      - key: WORKER_ID
+        value: hound-worker-prod-1
+      - key: NODE_ENV
+        value: production
