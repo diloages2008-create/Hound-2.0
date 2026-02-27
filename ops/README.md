@@ -9,6 +9,22 @@ This folder is the operational entry point for v0.1 backend deployment and verif
 
 ## 1) Deploy v0.1 backend
 
+Place secrets in `%USERPROFILE%\.hound-secrets\den.env` (recommended):
+
+```env
+SUPABASE_PROJECT_REF=YOUR_PROJECT_REF
+SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
+SERVICE_ROLE_KEY=YOUR_SERVICE_ROLE_KEY
+```
+
+Then run:
+
+```powershell
+.\ops\deploy-v01.ps1
+```
+
+Or pass values directly:
+
 ```powershell
 .\ops\deploy-v01.ps1 `
   -SupabaseProjectRef "YOUR_PROJECT_REF" `

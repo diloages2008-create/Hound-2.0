@@ -40,3 +40,13 @@ See `ops/README.md` for copy/paste usage.
 
 Electron runtime and packaging scripts are intentionally disabled for now.
 Desktop packaging is deferred until Web v1 stability is complete.
+
+## Local Secrets
+
+- Keep real secret files outside the repo at:
+  - `%USERPROFILE%\.hound-secrets\hound-studio\.env`
+  - `%USERPROFILE%\.hound-secrets\hound-listener\.env`
+  - `%USERPROFILE%\.hound-secrets\den.env`
+- Optional overrides:
+  - `HOUND_STUDIO_ENV_DIR` for Studio Vite env directory.
+  - `HOUND_LISTENER_ENV_DIR` for Listener UI Vite env directory.
