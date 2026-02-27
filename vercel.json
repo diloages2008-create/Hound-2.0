@@ -1,5 +1,5 @@
 {
-  "installCommand": "npm install --workspace apps/hound-studio || npm install",
-  "buildCommand": "npm run studio:build || npm run build",
-  "outputDirectory": "dist"
+  "installCommand": "npm --prefix apps/hound-studio install",
+  "buildCommand": "npm --prefix apps/hound-studio run build",
+  "outputDirectory": "apps/hound-studio/dist"
 }
