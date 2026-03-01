@@ -4,6 +4,10 @@ const API_BASE =
   import.meta.env.VITE_HOUND_API_BASE ||
   "https://rbhlvbutqzgqogsrqwet.supabase.co/functions/v1/api-v1";
 const API_MODE = import.meta.env.VITE_HOUND_API_MODE || "live";
+const SUPABASE_ANON =
+  import.meta.env.VITE_SUPABASE_ANON ||
+  import.meta.env.VITE_SUPABASE_ANON_KEY ||
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJiaGx2YnV0cXpncW9nc3Jxd2V0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY5MDg5NDQsImV4cCI6MjA4MjQ4NDk0NH0.RTIUt8x3k4ziUNltGCrNkda7BRpoxsxGtJBPOo-gqVk";
 
 const TOKEN_KEY = "hound_studio_access_token";
 const REFRESH_KEY = "hound_studio_refresh_token";
@@ -45,6 +49,12 @@ async function rawRequest(path, options = {}, auth = false) {
       throw new Error("No access token found. Login first.");
     }
     headers.Authorization = `Bearer ${token}`;
+  } else if (!headers.Authorization && SUPABASE_ANON) {
+    headers.Authorization = `Bearer ${SUPABASE_ANON}`;
+  }
+
+  if (SUPABASE_ANON && !headers.apikey) {
+    headers.apikey = SUPABASE_ANON;
   }
 
   if (API_MODE === "mock") {
