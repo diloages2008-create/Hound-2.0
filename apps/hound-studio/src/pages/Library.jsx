@@ -2,6 +2,10 @@ import React, { useEffect, useState } from "react";
 import { catalogAlbums } from "../data/studioData.js";
 import { API_BASE, getToken, listStudioReleases, deleteStudioRelease } from "../lib/apiClient.js";
 
+function isUuid(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ""));
+}
+
 function toCard(release) {
   return {
     id: release.releaseId,
@@ -43,6 +47,14 @@ export default function Library() {
 
   const handleDeleteRelease = async (releaseId) => {
     if (!releaseId) return;
+    if (!getToken()) {
+      setError("Login first. Only real API releases can be deleted.");
+      return;
+    }
+    if (!isUuid(releaseId)) {
+      setError("This card is local/sample data and cannot be deleted from the API.");
+      return;
+    }
     const ok = window.confirm("Delete this release and its tracks? This cannot be undone.");
     if (!ok) return;
     setBusy(true);
@@ -132,7 +144,7 @@ export default function Library() {
                       className="secondary-button"
                       style={{ width: "100%", textAlign: "left", borderRadius: 0, color: "#a40000" }}
                       onClick={() => handleDeleteRelease(album.id)}
-                      disabled={busy}
+                      disabled={busy || !getToken() || !isUuid(album.id)}
                     >
                       Delete Release
                     </button>
