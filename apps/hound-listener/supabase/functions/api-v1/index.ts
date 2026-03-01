@@ -41,9 +41,33 @@ function getRoutePath(pathname: string) {
   return path || "/";
 }
 
-function buildCoverUrl(coverAssetId: string | null) {
-  if (!coverAssetId) return "https://cdn.hound.fm/assets/default-cover.jpg";
-  return `https://cdn.hound.fm/assets/${coverAssetId}`;
+function buildDefaultCoverUrl() {
+  return "https://cdn.hound.fm/assets/default-cover.jpg";
+}
+
+function buildPublicObjectUrl(bucket: string, storagePath: string) {
+  const base = EDGE_SUPABASE_URL.replace(/\/+$/, "");
+  const objectPath = storagePath.replace(/^\/+/, "");
+  return `${base}/storage/v1/object/public/${bucket}/${objectPath}`;
+}
+
+async function resolveCoverUrlsByAssetIds(coverAssetIds: string[]) {
+  const ids = Array.from(new Set(coverAssetIds.filter((id) => typeof id === "string" && id.length > 0)));
+  if (ids.length === 0) return new Map<string, string>();
+
+  const { data } = await supabase
+    .from("upload_assets")
+    .select("asset_id, storage_bucket, storage_path")
+    .in("asset_id", ids);
+
+  const urlByAssetId = new Map<string, string>();
+  for (const row of data ?? []) {
+    const bucket = row.storage_bucket || STORAGE_BUCKET_COVERS;
+    const path = row.storage_path;
+    if (!path) continue;
+    urlByAssetId.set(row.asset_id, buildPublicObjectUrl(bucket, path));
+  }
+  return urlByAssetId;
 }
 
 function buildUploadUrl(assetId: string) {
@@ -913,11 +937,15 @@ Deno.serve(async (req) => {
 
       if (error) return json({ error: error.message }, 400);
 
+      const coverUrlByAssetId = await resolveCoverUrlsByAssetIds(
+        (releases ?? []).map((entry: any) => entry.cover_asset_id).filter(Boolean)
+      );
+
       const albums = (releases ?? []).map((entry: any) => ({
         albumId: entry.release_id,
         title: entry.title,
         artistName: entry.artist_profiles.stage_name,
-        coverUrl: buildCoverUrl(entry.cover_asset_id),
+        coverUrl: coverUrlByAssetId.get(entry.cover_asset_id) ?? buildDefaultCoverUrl(),
         genre: entry.genre,
         moodTags: entry.mood_tags ?? []
       }));
@@ -966,12 +994,16 @@ Deno.serve(async (req) => {
         credits = creditRows ?? [];
       }
 
+      const coverUrlByAssetId = await resolveCoverUrlsByAssetIds(
+        release.cover_asset_id ? [release.cover_asset_id] : []
+      );
+
       return json({
         album: {
           albumId: release.release_id,
           title: release.title,
           artistName: release.artist_profiles.stage_name,
-          coverUrl: buildCoverUrl(release.cover_asset_id),
+          coverUrl: coverUrlByAssetId.get(release.cover_asset_id) ?? buildDefaultCoverUrl(),
           genre: release.genre,
           moodTags: release.mood_tags ?? []
         },
@@ -1103,12 +1135,16 @@ Deno.serve(async (req) => {
         .in("release_id", targetIds)
         .eq("status", "live");
 
+      const coverUrlByAssetId = await resolveCoverUrlsByAssetIds(
+        (albums ?? []).map((album: any) => album.cover_asset_id).filter(Boolean)
+      );
+
       return json({
         albums: (albums ?? []).map((album: any) => ({
           albumId: album.release_id,
           title: album.title,
           artistName: album.artist_profiles.stage_name,
-          coverUrl: buildCoverUrl(album.cover_asset_id),
+          coverUrl: coverUrlByAssetId.get(album.cover_asset_id) ?? buildDefaultCoverUrl(),
           genre: album.genre,
           moodTags: album.mood_tags ?? []
         }))

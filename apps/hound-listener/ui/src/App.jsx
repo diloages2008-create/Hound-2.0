@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import Hls from "hls.js";
 import { mockListenerRequest } from "./mockCloudApi.js";
 
 // Track shape contract:
@@ -1107,6 +1108,8 @@ export default function App() {
   const navSkipRef = useRef(false);
   const audioARef = useRef(null);
   const audioBRef = useRef(null);
+  const hlsARef = useRef(null);
+  const hlsBRef = useRef(null);
   const activeAudioRef = useRef("A");
   const isCrossfadingRef = useRef(false);
   const lastPlayedTrackIdRef = useRef(null);
@@ -1246,6 +1249,56 @@ export default function App() {
 
   function getInactiveAudio() {
     return activeAudioRef.current === "A" ? audioBRef.current : audioARef.current;
+  }
+
+  function getHlsRefForAudio(audio) {
+    if (!audio) return null;
+    return audio === audioARef.current ? hlsARef : hlsBRef;
+  }
+
+  function clearAudioSource(audio) {
+    if (!audio) return;
+    const hlsRef = getHlsRefForAudio(audio);
+    if (hlsRef?.current) {
+      try {
+        hlsRef.current.destroy();
+      } catch {
+        // no-op
+      }
+      hlsRef.current = null;
+    }
+    audio.removeAttribute("src");
+    audio.load();
+  }
+
+  function setAudioSource(audio, src) {
+    if (!audio) return;
+    const hlsRef = getHlsRefForAudio(audio);
+    if (hlsRef?.current) {
+      try {
+        hlsRef.current.destroy();
+      } catch {
+        // no-op
+      }
+      hlsRef.current = null;
+    }
+
+    const isHlsManifest = typeof src === "string" && src.includes(".m3u8");
+    const canNativeHls =
+      typeof audio.canPlayType === "function" &&
+      (audio.canPlayType("application/vnd.apple.mpegurl") ||
+        audio.canPlayType("application/x-mpegURL"));
+
+    if (isHlsManifest && !canNativeHls && Hls.isSupported()) {
+      const hls = new Hls();
+      hls.loadSource(src);
+      hls.attachMedia(audio);
+      if (hlsRef) hlsRef.current = hls;
+      return;
+    }
+
+    audio.src = src;
+    audio.load();
   }
 
   const scaleVolume = (gain) => Math.min(1, Math.max(0, gain * volume));
@@ -1602,8 +1655,7 @@ export default function App() {
       if (!audio) return;
       audio.pause();
       audio.currentTime = 0;
-      audio.removeAttribute("src");
-      audio.load();
+      clearAudioSource(audio);
     });
   };
 
@@ -1857,8 +1909,7 @@ export default function App() {
     const baseVolume = settings.loudnessEnabled && Number.isFinite(track.gain) ? track.gain : 1;
     const safeVolume = scaleVolume(baseVolume);
     audio.volume = safeVolume;
-    audio.src = src;
-    audio.load();
+    setAudioSource(audio, src);
     setCurrentTime(0);
     setError("");
     session.startSessionIfNeeded();
@@ -1928,8 +1979,7 @@ export default function App() {
     nextAudio.pause();
     nextAudio.currentTime = 0;
     nextAudio.volume = 0;
-    nextAudio.src = src;
-    nextAudio.load();
+    setAudioSource(nextAudio, src);
     session.startSessionIfNeeded();
     session.markTrackPlayed();
     sessionPlayCountsRef.current[nextTrack.id] =
