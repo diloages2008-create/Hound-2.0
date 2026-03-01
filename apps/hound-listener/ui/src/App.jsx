@@ -1132,6 +1132,7 @@ export default function App() {
   const playContextRef = useRef("manual");
   const cloudEventMilestonesRef = useRef({});
   const cloudRetryRef = useRef({});
+  const remoteAudioUnlockedRef = useRef(false);
   const session = useSessionStats();
   const sessionPlayCountsRef = useRef({});
   const playStartRef = useRef(null);
@@ -1299,6 +1300,31 @@ export default function App() {
 
     audio.src = src;
     audio.load();
+  }
+
+  async function unlockRemoteAudioPlayback() {
+    if (remoteAudioUnlockedRef.current) return true;
+    const audio = getActiveAudio();
+    if (!audio) return false;
+    const previousMuted = audio.muted;
+    const previousVolume = audio.volume;
+    try {
+      // Prime media playback inside a user gesture so later async stream loads can start.
+      audio.muted = true;
+      audio.volume = 0;
+      audio.src = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=";
+      await audio.play();
+      audio.pause();
+      audio.removeAttribute("src");
+      audio.load();
+      remoteAudioUnlockedRef.current = true;
+      return true;
+    } catch {
+      return false;
+    } finally {
+      audio.muted = previousMuted;
+      audio.volume = previousVolume;
+    }
   }
 
   const scaleVolume = (gain) => Math.min(1, Math.max(0, gain * volume));
@@ -3659,6 +3685,7 @@ export default function App() {
     setCloudBusy(true);
     setCloudError("");
     try {
+      await unlockRemoteAudioPlayback();
       const stream = await cloudRequest(`/v1/listener/tracks/${track.trackId}/stream`);
       setCloudStreamInfo(stream);
       const localTrack = upsertCloudTrack(track, stream.manifestUrl, cloudAlbum?.album || null);

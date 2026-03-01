@@ -4,6 +4,7 @@ const EDGE_SUPABASE_URL = Deno.env.get("EDGE_SUPABASE_URL") ?? "";
 const EDGE_SERVICE_ROLE_KEY = Deno.env.get("EDGE_SERVICE_ROLE_KEY") ?? "";
 const STORAGE_BUCKET_MASTERS = Deno.env.get("STORAGE_BUCKET_MASTERS") ?? "hound-masters";
 const STORAGE_BUCKET_COVERS = Deno.env.get("STORAGE_BUCKET_COVERS") ?? "hound-covers";
+const STORAGE_BUCKET_STREAMS = Deno.env.get("STORAGE_BUCKET_STREAMS") ?? "hound-streams";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -49,6 +50,18 @@ function buildPublicObjectUrl(bucket: string, storagePath: string) {
   const base = EDGE_SUPABASE_URL.replace(/\/+$/, "");
   const objectPath = storagePath.replace(/^\/+/, "");
   return `${base}/storage/v1/object/public/${bucket}/${objectPath}`;
+}
+
+async function resolveStreamManifestBucket(streamManifestPath: string | null) {
+  if (!streamManifestPath) return STORAGE_BUCKET_STREAMS;
+  const normalizedPath = streamManifestPath.replace(/^\/+/, "");
+  const { data } = await supabase
+    .from("upload_assets")
+    .select("storage_bucket")
+    .eq("kind", "hls_manifest")
+    .eq("storage_path", normalizedPath)
+    .maybeSingle();
+  return data?.storage_bucket || STORAGE_BUCKET_STREAMS;
 }
 
 async function resolveCoverUrlsByAssetIds(coverAssetIds: string[]) {
@@ -1035,9 +1048,12 @@ Deno.serve(async (req) => {
         .maybeSingle();
       if (releaseError || !releaseRow) return json({ error: "track not available" }, 404);
 
-      const manifestUrl = track.stream_manifest_path
-        ? `https://cdn.hound.fm/${track.stream_manifest_path}`
-        : `https://cdn.hound.fm/manifests/${track.track_id}/index.m3u8`;
+      const streamBucket = await resolveStreamManifestBucket(track.stream_manifest_path);
+      const manifestPath = (track.stream_manifest_path || `manifests/${track.track_id}/index.m3u8`).replace(/^\/+/, "");
+      const manifestUrl =
+        /^https?:\/\//i.test(track.stream_manifest_path || "")
+          ? String(track.stream_manifest_path)
+          : buildPublicObjectUrl(streamBucket, manifestPath);
 
       return json({ trackId: track.track_id, manifestUrl, expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString() });
     }
