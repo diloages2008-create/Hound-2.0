@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { catalogAlbums } from "../data/studioData.js";
-import { API_BASE, getToken, listStudioReleases } from "../lib/apiClient.js";
+import { API_BASE, getToken, listStudioReleases, deleteStudioRelease } from "../lib/apiClient.js";
 
 function toCard(release) {
   return {
@@ -20,6 +20,7 @@ export default function Library() {
   const [albums, setAlbums] = useState(catalogAlbums);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [menuId, setMenuId] = useState("");
 
   const loadCatalog = async () => {
     if (!getToken()) return;
@@ -39,6 +40,23 @@ export default function Library() {
   useEffect(() => {
     loadCatalog();
   }, []);
+
+  const handleDeleteRelease = async (releaseId) => {
+    if (!releaseId) return;
+    const ok = window.confirm("Delete this release and its tracks? This cannot be undone.");
+    if (!ok) return;
+    setBusy(true);
+    setError("");
+    try {
+      await deleteStudioRelease(releaseId);
+      setAlbums((prev) => prev.filter((album) => album.id !== releaseId));
+      setMenuId("");
+    } catch (err) {
+      setError(err.message || "Failed to delete release.");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <div className="page-wrap">
@@ -75,6 +93,52 @@ export default function Library() {
                 </div>
               </div>
               <span className={`status-pill status-${album.status}`}>{album.status}</span>
+              <div style={{ marginLeft: "8px", position: "relative" }}>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => setMenuId((prev) => (prev === album.id ? "" : album.id))}
+                  style={{ minWidth: "36px", padding: "6px 10px" }}
+                >
+                  ...
+                </button>
+                {menuId === album.id ? (
+                  <div
+                    style={{
+                      position: "absolute",
+                      right: 0,
+                      top: "42px",
+                      background: "#fff",
+                      border: "1px solid #ddd",
+                      borderRadius: "8px",
+                      boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+                      zIndex: 10,
+                      minWidth: "180px"
+                    }}
+                  >
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      style={{ width: "100%", textAlign: "left", borderRadius: 0 }}
+                      onClick={() => {
+                        navigator.clipboard?.writeText(album.id);
+                        setMenuId("");
+                      }}
+                    >
+                      Copy Release ID
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      style={{ width: "100%", textAlign: "left", borderRadius: 0, color: "#a40000" }}
+                      onClick={() => handleDeleteRelease(album.id)}
+                      disabled={busy}
+                    >
+                      Delete Release
+                    </button>
+                  </div>
+                ) : null}
+              </div>
             </div>
             <div className="credit-block">
               {album.credits.map((credit) => (

@@ -445,6 +445,89 @@ Deno.serve(async (req) => {
       });
     }
 
+    const deleteReleaseId = getPathParam(routePath, /^\/v1\/studio\/releases\/([0-9a-f-]+)$/i);
+    if (req.method === "DELETE" && deleteReleaseId) {
+      const auth = await ensureAuth(req, "artist");
+      if (auth.error || !auth.context) return auth.error;
+
+      const artist = await getArtistProfileByUserId(auth.context.userId);
+      if (!artist) return json({ error: "artist profile not found" }, 404);
+
+      const { data: release, error: releaseError } = await supabase
+        .from("releases")
+        .select("release_id")
+        .eq("release_id", deleteReleaseId)
+        .eq("artist_id", artist.artist_id)
+        .single();
+
+      if (releaseError || !release) return json({ error: "release not found" }, 404);
+
+      const { data: tracks, error: tracksReadError } = await supabase
+        .from("tracks")
+        .select("track_id")
+        .eq("release_id", deleteReleaseId);
+      if (tracksReadError) return json({ error: tracksReadError.message }, 400);
+
+      const trackIds = (tracks ?? []).map((track: any) => track.track_id);
+      if (trackIds.length > 0) {
+        const { error: creditsError } = await supabase.from("track_credits").delete().in("track_id", trackIds);
+        if (creditsError) return json({ error: creditsError.message }, 400);
+        const { error: telemetryError } = await supabase.from("listener_events").delete().in("track_id", trackIds);
+        if (telemetryError) return json({ error: telemetryError.message }, 400);
+        const { error: savesError } = await supabase.from("listener_track_saves").delete().in("track_id", trackIds);
+        if (savesError) return json({ error: savesError.message }, 400);
+      }
+
+      const { error: jobsError } = await supabase.from("transcode_jobs").delete().eq("release_id", deleteReleaseId);
+      if (jobsError) return json({ error: jobsError.message }, 400);
+
+      const { error: tracksDeleteError } = await supabase.from("tracks").delete().eq("release_id", deleteReleaseId);
+      if (tracksDeleteError) return json({ error: tracksDeleteError.message }, 400);
+
+      const { error: suggestionsError } = await supabase
+        .from("release_suggestions")
+        .delete()
+        .or(`source_release_id.eq.${deleteReleaseId},target_release_id.eq.${deleteReleaseId}`);
+      if (suggestionsError) return json({ error: suggestionsError.message }, 400);
+
+      const { error: releaseDeleteError } = await supabase.from("releases").delete().eq("release_id", deleteReleaseId);
+      if (releaseDeleteError) return json({ error: releaseDeleteError.message }, 400);
+
+      return json({ ok: true, releaseId: deleteReleaseId });
+    }
+
+    const deleteTrackId = getPathParam(routePath, /^\/v1\/studio\/tracks\/([0-9a-f-]+)$/i);
+    if (req.method === "DELETE" && deleteTrackId) {
+      const auth = await ensureAuth(req, "artist");
+      if (auth.error || !auth.context) return auth.error;
+
+      const artist = await getArtistProfileByUserId(auth.context.userId);
+      if (!artist) return json({ error: "artist profile not found" }, 404);
+
+      const { data: track, error: trackReadError } = await supabase
+        .from("tracks")
+        .select("track_id, release_id, releases!inner(artist_id)")
+        .eq("track_id", deleteTrackId)
+        .single();
+      if (trackReadError || !track) return json({ error: "track not found" }, 404);
+
+      const trackArtistId = (track as any).releases?.artist_id;
+      if (trackArtistId !== artist.artist_id) return json({ error: "forbidden" }, 403);
+
+      const { error: creditsError } = await supabase.from("track_credits").delete().eq("track_id", deleteTrackId);
+      if (creditsError) return json({ error: creditsError.message }, 400);
+      const { error: telemetryError } = await supabase.from("listener_events").delete().eq("track_id", deleteTrackId);
+      if (telemetryError) return json({ error: telemetryError.message }, 400);
+      const { error: savesError } = await supabase.from("listener_track_saves").delete().eq("track_id", deleteTrackId);
+      if (savesError) return json({ error: savesError.message }, 400);
+      const { error: jobsError } = await supabase.from("transcode_jobs").delete().eq("track_id", deleteTrackId);
+      if (jobsError) return json({ error: jobsError.message }, 400);
+      const { error: trackDeleteError } = await supabase.from("tracks").delete().eq("track_id", deleteTrackId);
+      if (trackDeleteError) return json({ error: trackDeleteError.message }, 400);
+
+      return json({ ok: true, trackId: deleteTrackId });
+    }
+
     const masterIntentReleaseId = getPathParam(routePath, /^\/v1\/studio\/releases\/([0-9a-f-]+)\/uploads\/master-intent$/i);
     if (req.method === "POST" && masterIntentReleaseId) {
       const auth = await ensureAuth(req, "artist");

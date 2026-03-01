@@ -25,7 +25,9 @@ export default function Upload() {
   const [pipeline, setPipeline] = useState({
     releaseId: "",
     masterAssetId: "",
-    coverAssetId: ""
+    coverAssetId: "",
+    submitted: false,
+    published: false
   });
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -47,25 +49,38 @@ export default function Upload() {
     }
   };
 
-  const handleCreateRelease = () =>
-    run(async () => {
-      const result = await createRelease({
-        title: form.title,
-        releaseType: form.releaseType,
-        genre: form.genre,
-        moodTags: form.moodTags.split(",").map((tag) => tag.trim()).filter(Boolean),
-        about: form.about,
-        releaseDate: form.releaseDate || null
-      });
-      setPipeline((prev) => ({ ...prev, releaseId: result.releaseId }));
-      return `Release created: ${result.releaseId} (${result.status})`;
-    });
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-  const handleCreateMasterIntent = () =>
-    run(async () => {
-      if (!pipeline.releaseId) throw new Error("Create release first.");
+  const validateReleaseFields = () => {
+    if (!form.title.trim()) throw new Error("Title is required.");
+    if (!form.genre.trim()) throw new Error("Genre is required.");
+  };
+
+  const validateRequired = () => {
+    validateReleaseFields();
+    if (!masterFile && !pipeline.masterAssetId) throw new Error("Master audio is required.");
+    if (!coverFile && !pipeline.coverAssetId) throw new Error("Cover image is required.");
+  };
+
+  const ensureRelease = async () => {
+    if (pipeline.releaseId) return pipeline.releaseId;
+    const result = await createRelease({
+      title: form.title,
+      releaseType: form.releaseType,
+      genre: form.genre,
+      moodTags: form.moodTags.split(",").map((tag) => tag.trim()).filter(Boolean),
+      about: form.about,
+      releaseDate: form.releaseDate || null
+    });
+    setPipeline((prev) => ({ ...prev, releaseId: result.releaseId }));
+    return result.releaseId;
+  };
+
+  const uploadFileWithIntent = async (releaseId, type) => {
+    if (type === "master") {
+      if (pipeline.masterAssetId) return pipeline.masterAssetId;
       if (!masterFile) throw new Error("Choose a master audio file first.");
-      const intent = await createMasterUploadIntent(pipeline.releaseId, {
+      const intent = await createMasterUploadIntent(releaseId, {
         fileName: masterFile.name,
         contentType: masterFile.type || "audio/wav"
       });
@@ -77,38 +92,62 @@ export default function Upload() {
       if (!upload.ok) throw new Error("Failed to upload master file.");
       await completeUpload(intent.assetId, { byteSize: masterFile.size });
       setPipeline((prev) => ({ ...prev, masterAssetId: intent.assetId }));
-      return `Master intent completed: ${intent.assetId}`;
+      return intent.assetId;
+    }
+
+    if (pipeline.coverAssetId) return pipeline.coverAssetId;
+    if (!coverFile) throw new Error("Choose a cover image file first.");
+    const intent = await createCoverUploadIntent(releaseId, {
+      fileName: coverFile.name,
+      contentType: coverFile.type || "image/jpeg"
+    });
+    const upload = await fetch(intent.uploadUrl, {
+      method: "PUT",
+      headers: { "Content-Type": coverFile.type || "application/octet-stream" },
+      body: coverFile
+    });
+    if (!upload.ok) throw new Error("Failed to upload cover file.");
+    await completeUpload(intent.assetId, { byteSize: coverFile.size });
+    setPipeline((prev) => ({ ...prev, coverAssetId: intent.assetId }));
+    return intent.assetId;
+  };
+
+  const handleCreateRelease = () =>
+    run(async () => {
+      validateReleaseFields();
+      const releaseId = await ensureRelease();
+      return `Release created: ${releaseId}`;
+    });
+
+  const handleCreateMasterIntent = () =>
+    run(async () => {
+      if (!pipeline.releaseId) throw new Error("Create release first.");
+      const masterAssetId = await uploadFileWithIntent(pipeline.releaseId, "master");
+      return `Master upload completed: ${masterAssetId}`;
     });
 
   const handleCreateCoverIntent = () =>
     run(async () => {
       if (!pipeline.releaseId) throw new Error("Create release first.");
-      if (!coverFile) throw new Error("Choose a cover image file first.");
-      const intent = await createCoverUploadIntent(pipeline.releaseId, {
-        fileName: coverFile.name,
-        contentType: coverFile.type || "image/jpeg"
-      });
-      const upload = await fetch(intent.uploadUrl, {
-        method: "PUT",
-        headers: { "Content-Type": coverFile.type || "application/octet-stream" },
-        body: coverFile
-      });
-      if (!upload.ok) throw new Error("Failed to upload cover file.");
-      await completeUpload(intent.assetId, { byteSize: coverFile.size });
-      setPipeline((prev) => ({ ...prev, coverAssetId: intent.assetId }));
-      return `Cover intent completed: ${intent.assetId}`;
+      const coverAssetId = await uploadFileWithIntent(pipeline.releaseId, "cover");
+      return `Cover upload completed: ${coverAssetId}`;
     });
 
-  const handleSubmitRelease = () =>
+  const handleSubmitAndPreparePublish = () =>
     run(async () => {
-      if (!pipeline.releaseId || !pipeline.masterAssetId) throw new Error("Release + master asset required.");
-      const result = await submitRelease(pipeline.releaseId, {
-        coverAssetId: pipeline.coverAssetId || null,
+      validateRequired();
+      const releaseId = await ensureRelease();
+      const [masterAssetId, coverAssetId] = await Promise.all([
+        uploadFileWithIntent(releaseId, "master"),
+        uploadFileWithIntent(releaseId, "cover")
+      ]);
+      const result = await submitRelease(releaseId, {
+        coverAssetId,
         tracks: [
           {
             title: `${form.title} - Track 1`,
             trackNumber: 1,
-            masterAssetId: pipeline.masterAssetId,
+            masterAssetId,
             durationSec: 212,
             loudnessLUFS: -14.2,
             lyrics: "[Verse 1] ...",
@@ -119,14 +158,31 @@ export default function Upload() {
           }
         ]
       });
-      return `Release submitted: ${result.releaseId} (${result.status})`;
+      setPipeline((prev) => ({ ...prev, releaseId, masterAssetId, coverAssetId, submitted: true, published: false }));
+      return `Release submitted: ${result.releaseId} (${result.status}). Publish is now enabled.`;
     });
 
   const handlePublishRelease = () =>
     run(async () => {
       if (!pipeline.releaseId) throw new Error("Release required.");
-      const result = await publishRelease(pipeline.releaseId);
-      return `Release published: ${result.releaseId} (${result.status})`;
+      const maxAttempts = 45;
+      for (let i = 0; i < maxAttempts; i += 1) {
+        try {
+          const result = await publishRelease(pipeline.releaseId);
+          setPipeline((prev) => ({ ...prev, published: true }));
+          return `Release published: ${result.releaseId} (${result.status})`;
+        } catch (err) {
+          const msg = String(err.message || "");
+          const waiting =
+            msg.includes("track not ready for publish") ||
+            msg.includes("transcode jobs are not fully completed") ||
+            msg.includes("release not ready to publish");
+          if (!waiting) throw err;
+          setMessage(`Transcode still running... retrying publish (${i + 1}/${maxAttempts})`);
+          await sleep(8000);
+        }
+      }
+      throw new Error("Timed out waiting for transcode to finish. Try Publish again in a minute.");
     });
 
   return (
@@ -221,6 +277,8 @@ export default function Upload() {
             <li><strong>Release</strong><span>{pipeline.releaseId || "not created"}</span></li>
             <li><strong>Master Asset</strong><span>{pipeline.masterAssetId || "none"}</span></li>
             <li><strong>Cover Asset</strong><span>{pipeline.coverAssetId || "none"}</span></li>
+            <li><strong>Submitted</strong><span>{pipeline.submitted ? "yes" : "no"}</span></li>
+            <li><strong>Published</strong><span>{pipeline.published ? "yes" : "no"}</span></li>
           </ol>
 
           <div className="album-actions">
@@ -233,12 +291,15 @@ export default function Upload() {
             <button type="button" className="secondary-button" onClick={handleCreateCoverIntent} disabled={busy || !getToken()}>
               3) Upload Cover
             </button>
-            <button type="button" className="secondary-button" onClick={handleSubmitRelease} disabled={busy || !getToken()}>
-              4) Submit Release
-            </button>
-            <button type="button" className="primary-button" onClick={handlePublishRelease} disabled={busy || !getToken()}>
-              5) Publish
-            </button>
+            {!pipeline.submitted ? (
+              <button type="button" className="primary-button" onClick={handleSubmitAndPreparePublish} disabled={busy || !getToken()}>
+                4) Submit (Create + Upload + Submit)
+              </button>
+            ) : (
+              <button type="button" className="primary-button" onClick={handlePublishRelease} disabled={busy || !getToken()}>
+                5) Publish
+              </button>
+            )}
           </div>
 
           {!getToken() ? <p>Login in Profile first to run pipeline.</p> : null}

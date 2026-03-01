@@ -221,4 +221,12 @@ export async function publishRelease(releaseId) {
   return request(`/v1/studio/releases/${releaseId}/publish`, { method: "POST" }, true);
 }
 
+export async function deleteStudioRelease(releaseId) {
+  return request(`/v1/studio/releases/${releaseId}`, { method: "DELETE" }, true);
+}
+
+export async function deleteStudioTrack(trackId) {
+  return request(`/v1/studio/tracks/${trackId}`, { method: "DELETE" }, true);
+}
+
 export { API_BASE, API_MODE, getToken, getRefreshToken, clearSession, setSession, setToken };
