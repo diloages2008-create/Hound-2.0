@@ -712,6 +712,84 @@ Deno.serve(async (req) => {
     }
 
     const publishReleaseId = getPathParam(routePath, /^\/v1\/studio\/releases\/([0-9a-f-]+)\/publish$/i);
+    const readinessReleaseId = getPathParam(routePath, /^\/v1\/studio\/releases\/([0-9a-f-]+)\/readiness$/i);
+    if (req.method === "GET" && readinessReleaseId) {
+      const auth = await ensureAuth(req, "artist");
+      if (auth.error || !auth.context) return auth.error;
+
+      const artist = await getArtistProfileByUserId(auth.context.userId);
+      if (!artist) return json({ error: "artist profile not found" }, 404);
+
+      const { data: releaseRow, error: releaseReadError } = await supabase
+        .from("releases")
+        .select("release_id, status, artist_id")
+        .eq("release_id", readinessReleaseId)
+        .eq("artist_id", artist.artist_id)
+        .single();
+      if (releaseReadError || !releaseRow) return json({ error: "release not found" }, 404);
+
+      const { data: tracks } = await supabase
+        .from("tracks")
+        .select("track_id, stream_manifest_path, duration_sec, loudness_lufs, master_asset_id")
+        .eq("release_id", readinessReleaseId);
+
+      const trackMasterIds = (tracks ?? [])
+        .map((track: any) => track.master_asset_id)
+        .filter((id: string | null) => typeof id === "string" && id.length > 0);
+
+      const { data: masterAssets } = await supabase
+        .from("upload_assets")
+        .select("asset_id, status")
+        .in("asset_id", trackMasterIds);
+
+      const statusByAssetId = new Map((masterAssets ?? []).map((asset: any) => [asset.asset_id, asset.status]));
+
+      const trackReadiness = (tracks ?? []).map((track: any) => {
+        const masterStatus = statusByAssetId.get(track.master_asset_id) ?? null;
+        return {
+          trackId: track.track_id,
+          readiness: {
+            manifestReady: Boolean(track.stream_manifest_path),
+            durationReady: Number.isFinite(track.duration_sec) && track.duration_sec > 0,
+            loudnessReady: Number.isFinite(track.loudness_lufs),
+            masterProcessed: masterStatus === "processed",
+            masterStatus
+          }
+        };
+      });
+
+      const { data: pendingJobs } = await supabase
+        .from("transcode_jobs")
+        .select("job_id, status, track_id")
+        .eq("release_id", readinessReleaseId)
+        .in("status", ["queued", "in_progress", "failed"]);
+
+      const hasTracks = Array.isArray(tracks) && tracks.length > 0;
+      const allTracksReady = trackReadiness.every((t: any) =>
+        t.readiness.manifestReady &&
+        t.readiness.durationReady &&
+        t.readiness.loudnessReady &&
+        t.readiness.masterProcessed
+      );
+      const hasPendingJobs = Array.isArray(pendingJobs) && pendingJobs.length > 0;
+      const releaseTransitionReady = canReleaseTransition(releaseRow.status, "live");
+      const ready = hasTracks && allTracksReady && !hasPendingJobs && releaseTransitionReady;
+
+      return json({
+        releaseId: releaseRow.release_id,
+        releaseStatus: releaseRow.status,
+        ready,
+        summary: {
+          hasTracks,
+          allTracksReady,
+          hasPendingJobs,
+          releaseTransitionReady
+        },
+        pendingJobs: pendingJobs ?? [],
+        tracks: trackReadiness
+      });
+    }
+
     if (req.method === "POST" && publishReleaseId) {
       const auth = await ensureAuth(req, "artist");
       if (auth.error || !auth.context) return auth.error;
@@ -758,7 +836,26 @@ Deno.serve(async (req) => {
         return !(manifestReady && durationReady && loudnessReady && masterProcessed);
       });
       if (notReady) {
-        return json({ error: `track not ready for publish: ${notReady.track_id}` }, 400);
+        const masterStatus = statusByAssetId.get(notReady.master_asset_id) ?? null;
+        const readiness = {
+          manifestReady: Boolean(notReady.stream_manifest_path),
+          durationReady: Number.isFinite(notReady.duration_sec) && notReady.duration_sec > 0,
+          loudnessReady: Number.isFinite(notReady.loudness_lufs),
+          masterProcessed: masterStatus === "processed",
+          masterStatus
+        };
+
+        return json(
+          {
+            error: `track not ready for publish: ${notReady.track_id}`,
+            details: {
+              releaseId: publishReleaseId,
+              trackId: notReady.track_id,
+              readiness
+            }
+          },
+          400
+        );
       }
 
       const { data: pendingJobs } = await supabase
@@ -767,7 +864,16 @@ Deno.serve(async (req) => {
         .eq("release_id", publishReleaseId)
         .in("status", ["queued", "in_progress", "failed"]);
       if (pendingJobs && pendingJobs.length > 0) {
-        return json({ error: "transcode jobs are not fully completed" }, 400);
+        return json(
+          {
+            error: "transcode jobs are not fully completed",
+            details: {
+              releaseId: publishReleaseId,
+              pendingJobs
+            }
+          },
+          400
+        );
       }
 
       const { data: release, error } = await supabase

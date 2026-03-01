@@ -11,6 +11,7 @@ Use this file as the single navigation entry for docs.
 - `V02_OPERATOR_DASHBOARD_SPEC.md`: Minimum operator dashboard requirements.
 - `V02_72_HOUR_DRILL_PLAN.md`: Failure simulation drills with evidence capture.
 - `V02_RLS_POLICY_SUMMARY.md`: Table-by-table RLS classification and guardrails.
+- `KEY_INVENTORY.md`: Source of truth for keys/env variables and allowed locations.
 
 ## Handoff
 

@@ -79,6 +79,8 @@ async function rawRequest(path, options = {}, auth = false) {
   if (!response.ok) {
     const error = new Error(payload.error || `Request failed: ${response.status}`);
     error.status = response.status;
+    error.details = payload.details || null;
+    error.payload = payload || null;
     throw error;
   }
   return payload;

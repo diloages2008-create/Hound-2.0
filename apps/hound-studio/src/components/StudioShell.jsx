@@ -29,9 +29,6 @@ export default function StudioShell({ children }) {
             </NavLink>
           ))}
         </nav>
-        <div className="nav-footnote">
-          Curated onboarding only. No open upload floodgate.
-        </div>
       </aside>
       <main className="studio-main">{children}</main>
     </div>

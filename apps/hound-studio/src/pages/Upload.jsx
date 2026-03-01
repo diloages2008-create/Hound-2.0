@@ -35,6 +35,32 @@ export default function Upload() {
   const [masterFile, setMasterFile] = useState(null);
   const [coverFile, setCoverFile] = useState(null);
 
+  const formatError = (err) => {
+    if (!err) return "Unknown error";
+    const base = String(err.message || "Request failed");
+    const details = err.details;
+    if (!details) return base;
+
+    if (details.readiness) {
+      const missing = [];
+      if (!details.readiness.manifestReady) missing.push("manifest");
+      if (!details.readiness.durationReady) missing.push("duration");
+      if (!details.readiness.loudnessReady) missing.push("loudness");
+      if (!details.readiness.masterProcessed) {
+        const status = details.readiness.masterStatus || "unknown";
+        missing.push(`master status (${status})`);
+      }
+      return `${base} | missing: ${missing.join(", ")}`;
+    }
+
+    if (Array.isArray(details.pendingJobs) && details.pendingJobs.length > 0) {
+      const statuses = Array.from(new Set(details.pendingJobs.map((job) => job.status))).join(", ");
+      return `${base} | pending job statuses: ${statuses}`;
+    }
+
+    return base;
+  };
+
   const run = async (fn) => {
     setBusy(true);
     setMessage("");
@@ -43,7 +69,7 @@ export default function Upload() {
       const msg = await fn();
       setMessage(msg || "Done.");
     } catch (err) {
-      setError(err.message);
+      setError(formatError(err));
     } finally {
       setBusy(false);
     }
@@ -111,27 +137,6 @@ export default function Upload() {
     setPipeline((prev) => ({ ...prev, coverAssetId: intent.assetId }));
     return intent.assetId;
   };
-
-  const handleCreateRelease = () =>
-    run(async () => {
-      validateReleaseFields();
-      const releaseId = await ensureRelease();
-      return `Release created: ${releaseId}`;
-    });
-
-  const handleCreateMasterIntent = () =>
-    run(async () => {
-      if (!pipeline.releaseId) throw new Error("Create release first.");
-      const masterAssetId = await uploadFileWithIntent(pipeline.releaseId, "master");
-      return `Master upload completed: ${masterAssetId}`;
-    });
-
-  const handleCreateCoverIntent = () =>
-    run(async () => {
-      if (!pipeline.releaseId) throw new Error("Create release first.");
-      const coverAssetId = await uploadFileWithIntent(pipeline.releaseId, "cover");
-      return `Cover upload completed: ${coverAssetId}`;
-    });
 
   const handleSubmitAndPreparePublish = () =>
     run(async () => {
@@ -282,22 +287,13 @@ export default function Upload() {
           </ol>
 
           <div className="album-actions">
-            <button type="button" className="primary-button" onClick={handleCreateRelease} disabled={busy || !getToken()}>
-              1) Create Release
-            </button>
-            <button type="button" className="secondary-button" onClick={handleCreateMasterIntent} disabled={busy || !getToken()}>
-              2) Upload Master
-            </button>
-            <button type="button" className="secondary-button" onClick={handleCreateCoverIntent} disabled={busy || !getToken()}>
-              3) Upload Cover
-            </button>
             {!pipeline.submitted ? (
               <button type="button" className="primary-button" onClick={handleSubmitAndPreparePublish} disabled={busy || !getToken()}>
-                4) Submit (Create + Upload + Submit)
+                Submit Release
               </button>
             ) : (
               <button type="button" className="primary-button" onClick={handlePublishRelease} disabled={busy || !getToken()}>
-                5) Publish
+                Publish Release
               </button>
             )}
           </div>

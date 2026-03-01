@@ -43,3 +43,5 @@ apps/**/supabase/supabase.exe
 # Local runtime data
 apps/hound-listener/data/
 
+.vercel
+.env*.local
