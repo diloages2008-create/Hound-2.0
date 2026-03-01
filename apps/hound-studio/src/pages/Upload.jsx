@@ -30,6 +30,8 @@ export default function Upload() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [masterFile, setMasterFile] = useState(null);
+  const [coverFile, setCoverFile] = useState(null);
 
   const run = async (fn) => {
     setBusy(true);
@@ -62,11 +64,18 @@ export default function Upload() {
   const handleCreateMasterIntent = () =>
     run(async () => {
       if (!pipeline.releaseId) throw new Error("Create release first.");
+      if (!masterFile) throw new Error("Choose a master audio file first.");
       const intent = await createMasterUploadIntent(pipeline.releaseId, {
-        fileName: "track-01-master.wav",
-        contentType: "audio/wav"
+        fileName: masterFile.name,
+        contentType: masterFile.type || "audio/wav"
       });
-      await completeUpload(intent.assetId, { byteSize: 12345678, checksumSha256: "mock-master-sha" });
+      const upload = await fetch(intent.uploadUrl, {
+        method: "PUT",
+        headers: { "Content-Type": masterFile.type || "application/octet-stream" },
+        body: masterFile
+      });
+      if (!upload.ok) throw new Error("Failed to upload master file.");
+      await completeUpload(intent.assetId, { byteSize: masterFile.size });
       setPipeline((prev) => ({ ...prev, masterAssetId: intent.assetId }));
       return `Master intent completed: ${intent.assetId}`;
     });
@@ -74,11 +83,18 @@ export default function Upload() {
   const handleCreateCoverIntent = () =>
     run(async () => {
       if (!pipeline.releaseId) throw new Error("Create release first.");
+      if (!coverFile) throw new Error("Choose a cover image file first.");
       const intent = await createCoverUploadIntent(pipeline.releaseId, {
-        fileName: "cover.jpg",
-        contentType: "image/jpeg"
+        fileName: coverFile.name,
+        contentType: coverFile.type || "image/jpeg"
       });
-      await completeUpload(intent.assetId, { byteSize: 543210, checksumSha256: "mock-cover-sha" });
+      const upload = await fetch(intent.uploadUrl, {
+        method: "PUT",
+        headers: { "Content-Type": coverFile.type || "application/octet-stream" },
+        body: coverFile
+      });
+      if (!upload.ok) throw new Error("Failed to upload cover file.");
+      await completeUpload(intent.assetId, { byteSize: coverFile.size });
       setPipeline((prev) => ({ ...prev, coverAssetId: intent.assetId }));
       return `Cover intent completed: ${intent.assetId}`;
     });
@@ -183,6 +199,24 @@ export default function Upload() {
 
         <article className="panel">
           <h2>Pipeline Actions</h2>
+          <div className="form-grid">
+            <label className="wide">
+              Master Audio File
+              <input
+                type="file"
+                accept="audio/*,.wav,.mp3,.flac,.m4a,.aac,.ogg,.opus"
+                onChange={(event) => setMasterFile(event.target.files?.[0] || null)}
+              />
+            </label>
+            <label className="wide">
+              Cover Image File
+              <input
+                type="file"
+                accept="image/*,.jpg,.jpeg,.png,.webp"
+                onChange={(event) => setCoverFile(event.target.files?.[0] || null)}
+              />
+            </label>
+          </div>
           <ol className="status-stack">
             <li><strong>Release</strong><span>{pipeline.releaseId || "not created"}</span></li>
             <li><strong>Master Asset</strong><span>{pipeline.masterAssetId || "none"}</span></li>
