@@ -138,12 +138,27 @@ async function measureLoudnessLufs(inputPath) {
     "-"
   ]);
 
+  // Prefer direct extraction from ffmpeg loudnorm output. This is resilient to
+  // non-JSON noise lines that can appear around the stats block.
+  const inputMatch = stderr.match(/"input_i"\s*:\s*"?(?<value>-?\d+(?:\.\d+)?)"?/);
+  if (inputMatch?.groups?.value) {
+    const i = Number(inputMatch.groups.value);
+    if (Number.isFinite(i)) return Number(i.toFixed(2));
+  }
+
+  // Fallback: parse the last JSON-like block if present.
   const jsonMatch = stderr.match(/\{[\s\S]*?\}/g);
-  if (!jsonMatch || jsonMatch.length === 0) throw new Error("unable to parse loudness stats");
-  const parsed = JSON.parse(jsonMatch[jsonMatch.length - 1]);
-  const i = Number(parsed.input_i);
-  if (!Number.isFinite(i)) throw new Error("invalid input_i loudness");
-  return Number(i.toFixed(2));
+  if (jsonMatch && jsonMatch.length > 0) {
+    try {
+      const parsed = JSON.parse(jsonMatch[jsonMatch.length - 1]);
+      const i = Number(parsed.input_i);
+      if (Number.isFinite(i)) return Number(i.toFixed(2));
+    } catch {
+      // continue to hard failure below
+    }
+  }
+
+  throw new Error("unable to parse loudness stats");
 }
 
 async function transcodeToHls(inputPath, outDir) {
