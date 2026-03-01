@@ -172,7 +172,8 @@ const SUPABASE_URL =
   (typeof import.meta !== "undefined" && import.meta.env?.VITE_SUPABASE_URL) ||
   "https://rbhlvbutqzgqogsrqwet.supabase.co";
 const SUPABASE_ANON =
-  (typeof import.meta !== "undefined" && import.meta.env?.VITE_SUPABASE_ANON) ||
+  (typeof import.meta !== "undefined" &&
+    (import.meta.env?.VITE_SUPABASE_ANON || import.meta.env?.VITE_SUPABASE_ANON_KEY)) ||
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJiaGx2YnV0cXpncW9nc3Jxd2V0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY5MDg5NDQsImV4cCI6MjA4MjQ4NDk0NH0.RTIUt8x3k4ziUNltGCrNkda7BRpoxsxGtJBPOo-gqVk";
 const GATE_BASE = `${SUPABASE_URL}/functions/v1`;
 const REDEEM_URL = `${GATE_BASE}/redeem`;
