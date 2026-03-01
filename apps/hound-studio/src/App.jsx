@@ -4,6 +4,7 @@ import Dashboard from "./pages/Dashboard.jsx";
 import Upload from "./pages/Upload.jsx";
 import Library from "./pages/Library.jsx";
 import Profile from "./pages/Profile.jsx";
+import Auth from "./pages/Auth.jsx";
 import StudioShell from "./components/StudioShell.jsx";
 import { getAuthMe, getRefreshToken, getToken } from "./lib/apiClient.js";
 
@@ -42,25 +43,27 @@ function AuthGate({ children }) {
     );
   }
 
-  if (!state.authed && location.pathname !== "/profile") {
-    return <Navigate to="/profile" replace />;
+  if (!state.authed && location.pathname !== "/auth") {
+    return <Navigate to="/auth" replace />;
   }
 
+  if (state.authed && location.pathname === "/auth") {
+    return <Navigate to="/dashboard" replace />;
+  }
   return children;
 }
 
 export default function App() {
   return (
-    <StudioShell>
-      <AuthGate>
-        <Routes>
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
-          <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/upload" element={<Upload />} />
-          <Route path="/library" element={<Library />} />
-          <Route path="/profile" element={<Profile />} />
-        </Routes>
-      </AuthGate>
-    </StudioShell>
+    <AuthGate>
+      <Routes>
+        <Route path="/auth" element={<Auth />} />
+        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        <Route path="/dashboard" element={<StudioShell><Dashboard /></StudioShell>} />
+        <Route path="/upload" element={<StudioShell><Upload /></StudioShell>} />
+        <Route path="/library" element={<StudioShell><Library /></StudioShell>} />
+        <Route path="/profile" element={<StudioShell><Profile /></StudioShell>} />
+      </Routes>
+    </AuthGate>
   );
 }

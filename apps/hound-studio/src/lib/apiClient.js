@@ -12,25 +12,34 @@ const SUPABASE_ANON =
 const TOKEN_KEY = "hound_studio_access_token";
 const REFRESH_KEY = "hound_studio_refresh_token";
 
+function readStorage(key) {
+  return sessionStorage.getItem(key) || localStorage.getItem(key) || "";
+}
+
 function getToken() {
-  return localStorage.getItem(TOKEN_KEY) || "";
+  return readStorage(TOKEN_KEY);
 }
 
 function getRefreshToken() {
-  return localStorage.getItem(REFRESH_KEY) || "";
+  return readStorage(REFRESH_KEY);
 }
 
-function setSession(accessToken, refreshToken = "") {
-  if (accessToken) localStorage.setItem(TOKEN_KEY, accessToken);
-  else localStorage.removeItem(TOKEN_KEY);
+function setSession(accessToken, refreshToken = "", rememberMe = true) {
+  const store = rememberMe ? localStorage : sessionStorage;
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(REFRESH_KEY);
+  sessionStorage.removeItem(TOKEN_KEY);
+  sessionStorage.removeItem(REFRESH_KEY);
 
-  if (refreshToken) localStorage.setItem(REFRESH_KEY, refreshToken);
-  else localStorage.removeItem(REFRESH_KEY);
+  if (accessToken) store.setItem(TOKEN_KEY, accessToken);
+  if (refreshToken) store.setItem(REFRESH_KEY, refreshToken);
 }
 
 function clearSession() {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(REFRESH_KEY);
+  sessionStorage.removeItem(TOKEN_KEY);
+  sessionStorage.removeItem(REFRESH_KEY);
 }
 
 function setToken(token) {
@@ -103,33 +112,36 @@ async function request(path, options = {}, auth = false) {
 }
 
 export async function signupArtist(body) {
+  const rememberMe = body?.rememberMe !== false;
   const result = await request("/v1/auth/artist/signup", {
     method: "POST",
     body: JSON.stringify(body)
   });
   if (result.accessToken || result.refreshToken) {
-    setSession(result.accessToken || "", result.refreshToken || "");
+    setSession(result.accessToken || "", result.refreshToken || "", rememberMe);
   }
   return result;
 }
 
 export async function signupListener(body) {
+  const rememberMe = body?.rememberMe !== false;
   const result = await request("/v1/auth/listener/signup", {
     method: "POST",
     body: JSON.stringify(body)
   });
   if (result.accessToken || result.refreshToken) {
-    setSession(result.accessToken || "", result.refreshToken || "");
+    setSession(result.accessToken || "", result.refreshToken || "", rememberMe);
   }
   return result;
 }
 
 export async function loginArtist(body) {
+  const rememberMe = body?.rememberMe !== false;
   const result = await request("/v1/auth/artist/login", {
     method: "POST",
     body: JSON.stringify(body)
   });
-  setSession(result.accessToken || "", result.refreshToken || "");
+  setSession(result.accessToken || "", result.refreshToken || "", rememberMe);
   return result;
 }
 
