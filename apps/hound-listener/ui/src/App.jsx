@@ -1132,7 +1132,6 @@ export default function App() {
   const playContextRef = useRef("manual");
   const cloudEventMilestonesRef = useRef({});
   const cloudRetryRef = useRef({});
-  const remoteAudioUnlockedRef = useRef(false);
   const session = useSessionStats();
   const sessionPlayCountsRef = useRef({});
   const playStartRef = useRef(null);
@@ -1302,29 +1301,13 @@ export default function App() {
     audio.load();
   }
 
-  async function unlockRemoteAudioPlayback() {
-    if (remoteAudioUnlockedRef.current) return true;
-    const audio = getActiveAudio();
-    if (!audio) return false;
-    const previousMuted = audio.muted;
-    const previousVolume = audio.volume;
-    try {
-      // Prime media playback inside a user gesture so later async stream loads can start.
-      audio.muted = true;
-      audio.volume = 0;
-      audio.src = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=";
-      await audio.play();
-      audio.pause();
-      audio.removeAttribute("src");
-      audio.load();
-      remoteAudioUnlockedRef.current = true;
-      return true;
-    } catch {
-      return false;
-    } finally {
-      audio.muted = previousMuted;
-      audio.volume = previousVolume;
-    }
+  function canPlayHlsSource(audio, src) {
+    if (!audio || typeof src !== "string" || !src.includes(".m3u8")) return true;
+    const canNativeHls =
+      typeof audio.canPlayType === "function" &&
+      (audio.canPlayType("application/vnd.apple.mpegurl") ||
+        audio.canPlayType("application/x-mpegURL"));
+    return Boolean(canNativeHls || Hls.isSupported());
   }
 
   const scaleVolume = (gain) => Math.min(1, Math.max(0, gain * volume));
@@ -1719,10 +1702,20 @@ export default function App() {
             setCloudStreamInfo(refreshed);
             setTracks((prev) =>
               prev.map((track) =>
-                track.id === current.id ? { ...track, remoteUrl: refreshed.manifestUrl } : track
+                track.id === current.id
+                  ? {
+                      ...track,
+                      remoteUrl: refreshed.manifestUrl,
+                      remoteFallbackUrl: refreshed.fallbackUrl || track.remoteFallbackUrl || null
+                    }
+                  : track
               )
             );
-            loadAndPlay({ ...current, remoteUrl: refreshed.manifestUrl });
+            loadAndPlay({
+              ...current,
+              remoteUrl: refreshed.manifestUrl,
+              remoteFallbackUrl: refreshed.fallbackUrl || current.remoteFallbackUrl || null
+            });
             return;
           } catch {
             // fall through to error
@@ -1929,7 +1922,11 @@ export default function App() {
     }
     const audio = getActiveAudio();
     if (!audio) return;
-    const src = getTrackPlaybackSrc(track);
+    const primarySrc = getTrackPlaybackSrc(track);
+    const src =
+      track?.remoteFallbackUrl && !canPlayHlsSource(audio, primarySrc)
+        ? track.remoteFallbackUrl
+        : primarySrc;
     stopAllAudio();
     // Signal chain: per-track LUFS gain -> session envelope (crossfade) -> app volume (unity).
     const baseVolume = settings.loudnessEnabled && Number.isFinite(track.gain) ? track.gain : 1;
@@ -3658,6 +3655,7 @@ export default function App() {
         album,
         path: existing?.path || "",
         remoteUrl: streamUrl || existing?.remoteUrl || null,
+        remoteFallbackUrl: track.fallbackUrl || existing?.remoteFallbackUrl || null,
         durationSec: track.durationSec || existing?.durationSec || null,
         saved: existing?.saved || false,
         rotation: existing?.rotation || false,
@@ -3685,10 +3683,13 @@ export default function App() {
     setCloudBusy(true);
     setCloudError("");
     try {
-      await unlockRemoteAudioPlayback();
       const stream = await cloudRequest(`/v1/listener/tracks/${track.trackId}/stream`);
       setCloudStreamInfo(stream);
-      const localTrack = upsertCloudTrack(track, stream.manifestUrl, cloudAlbum?.album || null);
+      const localTrack = upsertCloudTrack(
+        { ...track, fallbackUrl: stream.fallbackUrl || null },
+        stream.manifestUrl,
+        cloudAlbum?.album || null
+      );
       if (localTrack) {
         setContext({ type: "cloud_album", label: `Cloud Album: ${cloudAlbum?.album?.title || "Unknown"}`, trackIds: [localTrack.id] });
         setSelectedTrackId(localTrack.id);
@@ -3706,7 +3707,11 @@ export default function App() {
     setCloudError("");
     try {
       const stream = await cloudRequest(`/v1/listener/tracks/${track.trackId}/stream`);
-      const localTrack = upsertCloudTrack(track, stream.manifestUrl, cloudAlbum?.album || null);
+      const localTrack = upsertCloudTrack(
+        { ...track, fallbackUrl: stream.fallbackUrl || null },
+        stream.manifestUrl,
+        cloudAlbum?.album || null
+      );
       if (localTrack) {
         setQueue((prev) => [...prev, localTrack.id]);
         setCloudMessage(`Queued remote track: ${track.title}`);
