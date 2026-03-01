@@ -62,6 +62,13 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function isMissingTableError(error: { message?: string; code?: string } | null | undefined) {
+  if (!error) return false;
+  if (error.code === "42P01") return true;
+  const message = String(error.message ?? "").toLowerCase();
+  return message.includes("could not find the table") || message.includes("does not exist");
+}
+
 async function parseJson(req: Request) {
   return await req.json().catch(() => ({}));
 }
@@ -488,7 +495,9 @@ Deno.serve(async (req) => {
         .from("release_suggestions")
         .delete()
         .or(`source_release_id.eq.${deleteReleaseId},target_release_id.eq.${deleteReleaseId}`);
-      if (suggestionsError) return json({ error: suggestionsError.message }, 400);
+      if (suggestionsError && !isMissingTableError(suggestionsError)) {
+        return json({ error: suggestionsError.message }, 400);
+      }
 
       const { error: releaseDeleteError } = await supabase.from("releases").delete().eq("release_id", deleteReleaseId);
       if (releaseDeleteError) return json({ error: releaseDeleteError.message }, 400);
