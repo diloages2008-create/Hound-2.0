@@ -8,7 +8,7 @@ const STORAGE_BUCKET_COVERS = Deno.env.get("STORAGE_BUCKET_COVERS") ?? "hound-co
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "GET,POST,PUT,OPTIONS"
+  "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS"
 };
 
 const supabase = createClient(EDGE_SUPABASE_URL, EDGE_SERVICE_ROLE_KEY, {
