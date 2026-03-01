@@ -472,7 +472,7 @@ Deno.serve(async (req) => {
       if (trackIds.length > 0) {
         const { error: creditsError } = await supabase.from("track_credits").delete().in("track_id", trackIds);
         if (creditsError) return json({ error: creditsError.message }, 400);
-        const { error: telemetryError } = await supabase.from("listener_events").delete().in("track_id", trackIds);
+        const { error: telemetryError } = await supabase.from("listener_play_events").delete().in("track_id", trackIds);
         if (telemetryError) return json({ error: telemetryError.message }, 400);
         const { error: savesError } = await supabase.from("listener_track_saves").delete().in("track_id", trackIds);
         if (savesError) return json({ error: savesError.message }, 400);
@@ -516,7 +516,7 @@ Deno.serve(async (req) => {
 
       const { error: creditsError } = await supabase.from("track_credits").delete().eq("track_id", deleteTrackId);
       if (creditsError) return json({ error: creditsError.message }, 400);
-      const { error: telemetryError } = await supabase.from("listener_events").delete().eq("track_id", deleteTrackId);
+      const { error: telemetryError } = await supabase.from("listener_play_events").delete().eq("track_id", deleteTrackId);
       if (telemetryError) return json({ error: telemetryError.message }, 400);
       const { error: savesError } = await supabase.from("listener_track_saves").delete().eq("track_id", deleteTrackId);
       if (savesError) return json({ error: savesError.message }, 400);
