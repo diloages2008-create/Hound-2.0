@@ -3643,40 +3643,39 @@ export default function App() {
     const cloudId = `cloud:${track.trackId}`;
     const album = albumMeta?.title || cloudAlbum?.album?.title || "Cloud Album";
     const artist = albumMeta?.artistName || cloudAlbum?.album?.artistName || "Cloud Artist";
-    let finalTrack = null;
+    const existing = tracks.find((item) => item.id === cloudId);
+    const next = {
+      ...(existing || {}),
+      id: cloudId,
+      cloudTrackId: track.trackId,
+      title: track.title || existing?.title || "Cloud Track",
+      artist,
+      album,
+      path: existing?.path || "",
+      remoteUrl: streamUrl || existing?.remoteUrl || null,
+      remoteFallbackUrl: track.fallbackUrl || existing?.remoteFallbackUrl || null,
+      durationSec: track.durationSec || existing?.durationSec || null,
+      saved: existing?.saved || false,
+      rotation: existing?.rotation || false,
+      rotationOverride: existing?.rotationOverride || "none",
+      rotationScore: existing?.rotationScore || 0,
+      playCountTotal: existing?.playCountTotal || 0,
+      playHistory: Array.isArray(existing?.playHistory) ? existing.playHistory : [],
+      analysisStatus: existing?.analysisStatus || "complete",
+      loudnessLUFS: existing?.loudnessLUFS || null,
+      gain: existing?.gain || 1,
+      loudnessReady: true,
+      forceOn: existing?.forceOn || false,
+      forceOff: existing?.forceOff || false
+    };
     setTracks((prev) => {
-      const existing = prev.find((item) => item.id === cloudId);
-      const next = {
-        ...(existing || {}),
-        id: cloudId,
-        cloudTrackId: track.trackId,
-        title: track.title || existing?.title || "Cloud Track",
-        artist,
-        album,
-        path: existing?.path || "",
-        remoteUrl: streamUrl || existing?.remoteUrl || null,
-        remoteFallbackUrl: track.fallbackUrl || existing?.remoteFallbackUrl || null,
-        durationSec: track.durationSec || existing?.durationSec || null,
-        saved: existing?.saved || false,
-        rotation: existing?.rotation || false,
-        rotationOverride: existing?.rotationOverride || "none",
-        rotationScore: existing?.rotationScore || 0,
-        playCountTotal: existing?.playCountTotal || 0,
-        playHistory: Array.isArray(existing?.playHistory) ? existing.playHistory : [],
-        analysisStatus: existing?.analysisStatus || "complete",
-        loudnessLUFS: existing?.loudnessLUFS || null,
-        gain: existing?.gain || 1,
-        loudnessReady: true,
-        forceOn: existing?.forceOn || false,
-        forceOff: existing?.forceOff || false
-      };
-      finalTrack = next;
-      if (existing) {
+      const existsInPrev = prev.some((item) => item.id === cloudId);
+      if (existsInPrev) {
         return prev.map((item) => (item.id === cloudId ? next : item));
       }
       return [next, ...prev];
     });
-    return finalTrack;
+    return next;
   };
 
   const playCloudTrack = async (track) => {
