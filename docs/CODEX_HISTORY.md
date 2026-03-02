@@ -296,3 +296,32 @@ Key files:
   - boot banner confirmed from production logs
   - LIVE and RESTART checkpoints reached
   - laptop-off checkpoint remains pending until public frontend hosting is available for non-local device flow.
+
+## Session Log (2026-03-01, Remote Playback Buffering Incident Resolved)
+- Diagnosed transport vs metadata split:
+  - album/detail API was healthy (`200`) but did not prove media-plane playback.
+  - verified manifest + segment request behavior separately.
+- Fixed stream URL source in `api-v1`:
+  - removed hard dependency on unresolved `cdn.hound.fm` stream host.
+  - stream resolve now returns Supabase Storage-backed manifest URLs.
+  - file: `apps/hound-listener/supabase/functions/api-v1/index.ts`
+- Fixed stream bucket mismatch handling:
+  - `/v1/listener/tracks/{trackId}/stream` now resolves manifest bucket from `upload_assets` for the requested path.
+- Added stream fallback URL support:
+  - API now includes `fallbackUrl` (signed master asset URL) for clients that cannot use HLS.
+  - listener player now stores `remoteFallbackUrl` and can select fallback source when HLS is unsupported.
+- Fixed listener play flow bug blocking playback start:
+  - `upsertCloudTrack()` was returning `null` due async state timing, so `loadAndPlay()` was never called.
+  - updated to return constructed track synchronously and update state separately.
+  - file: `apps/hound-listener/ui/src/App.jsx`
+- Removed failing unlock-hack:
+  - deleted data-URI audio pre-play unlock path that triggered `NotSupportedError` on target browser.
+  - file: `apps/hound-listener/ui/src/App.jsx`
+- Fixed production CSP block on media:
+  - expanded `media-src` and `img-src` to allow Supabase/CDN remote media hosts.
+  - file: `apps/hound-listener/ui/index.html`
+- Verification outcomes:
+  - manifest URL: `200 OK`
+  - segment URL: `200 OK`
+  - CSP block removed
+  - confirmed live remote playback success ("Thriller" first track).
