@@ -159,6 +159,13 @@ export async function runAdminReleaseAction(releaseId, body) {
   }, true);
 }
 
+export async function runAdminTrackAction(trackId, body) {
+  return request(`/v1/admin/tracks/${trackId}/actions`, {
+    method: "POST",
+    body: JSON.stringify(body)
+  }, true);
+}
+
 export async function listAdminJobs(params = {}) {
   const search = new URLSearchParams();
   if (params.status) search.set("status", params.status);

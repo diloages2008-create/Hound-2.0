@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
-import { getAdminRelease, runAdminReleaseAction } from "../lib/apiClient.js";
+import { getAdminRelease, runAdminReleaseAction, runAdminTrackAction } from "../lib/apiClient.js";
 
 const actionButtons = [
   ["approve", "Approve"],
@@ -57,6 +57,16 @@ export default function DenReleaseDetail() {
     await load();
   };
 
+  const deleteTrackPermanently = async (trackId, title) => {
+    if (!trackId) return;
+    const confirmText = window.prompt(`Type DELETE to permanently remove track "${title}" (${trackId}).`);
+    if (confirmText !== "DELETE") return;
+    const reason = window.prompt("Reason for permanent track deletion:");
+    if (!reason) return;
+    await runAdminTrackAction(trackId, { action: "delete_permanent", reason });
+    await load();
+  };
+
   const release = detail?.release;
 
   return (
@@ -94,6 +104,16 @@ export default function DenReleaseDetail() {
               <li key={track.trackId}>
                 <strong>{track.trackNumber}. {track.title}</strong>
                 <span>Duration: {track.durationSec ?? "-"} | HLS: {track.hlsManifestStatus} | Asset: {track.audioAssetHealth}</span>
+                <div className="album-actions">
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => deleteTrackPermanently(track.trackId, track.title)}
+                    disabled={busy}
+                  >
+                    Delete Permanently
+                  </button>
+                </div>
               </li>
             ))}
           </ol>
