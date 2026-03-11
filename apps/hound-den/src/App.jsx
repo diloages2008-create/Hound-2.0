@@ -16,21 +16,21 @@ import { getAuthMe, getRefreshToken, getToken } from "./lib/apiClient.js";
 
 function AdminGate({ children }) {
   const location = useLocation();
-  const [state, setState] = useState({ loading: true, authed: false, role: null });
+  const [state, setState] = useState({ loading: true, authed: false, role: null, roles: [] });
 
   useEffect(() => {
     let mounted = true;
     const boot = async () => {
       const hasSession = Boolean(getToken() || getRefreshToken());
       if (!hasSession) {
-        if (mounted) setState({ loading: false, authed: false, role: null });
+        if (mounted) setState({ loading: false, authed: false, role: null, roles: [] });
         return;
       }
       try {
         const me = await getAuthMe();
-        if (mounted) setState({ loading: false, authed: true, role: me.role || null });
+        if (mounted) setState({ loading: false, authed: true, role: me.role || null, roles: Array.isArray(me.roles) ? me.roles : [] });
       } catch {
-        if (mounted) setState({ loading: false, authed: false, role: null });
+        if (mounted) setState({ loading: false, authed: false, role: null, roles: [] });
       }
     };
     boot();
@@ -53,7 +53,7 @@ function AdminGate({ children }) {
     return <Navigate to="/auth" replace />;
   }
 
-  if (state.authed && state.role !== "admin") {
+  if (state.authed && !state.roles.includes("admin") && state.role !== "admin") {
     return <Navigate to="/auth" replace />;
   }
 

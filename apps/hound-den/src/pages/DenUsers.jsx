@@ -34,6 +34,14 @@ export default function DenUsers() {
     await load();
   };
 
+  const toggleRole = async (user, role, enabled) => {
+    const action = enabled ? "revoke_role" : "grant_role";
+    const reason = window.prompt(`Reason for ${action} ${role} on ${user.email}:`);
+    if (!reason) return;
+    await runAdminUserAction(user.userId, { action, role, reason });
+    await load();
+  };
+
   const deleteUser = async (user) => {
     const marker = window.prompt(`Type DELETE to permanently remove user ${user.email}.`);
     if (marker !== "DELETE") return;
@@ -65,11 +73,21 @@ export default function DenUsers() {
               <strong>{user.email}</strong>
               <span>ID: {user.userId}</span>
               <span>Role: {user.role}{user.adminScope ? ` (${user.adminScope})` : ""} | Status: {user.accountStatus}</span>
+              <span>Roles: {(user.roles || []).join(", ") || "-"}</span>
               <span>Saved tracks: {user.savedLibraryCount} | Play events: {user.telemetrySummary?.playEvents ?? 0}</span>
               <span>Last active: {user.lastActiveAt ? new Date(user.lastActiveAt).toLocaleString() : "-"}</span>
               <div className="album-actions">
                 <button type="button" className="secondary-button" onClick={() => runAction(user, "suspend")}>Suspend</button>
                 <button type="button" className="secondary-button" onClick={() => runAction(user, "reinstate")}>Reinstate</button>
+                <button type="button" className="secondary-button" onClick={() => toggleRole(user, "artist", (user.roles || []).includes("artist"))}>
+                  {(user.roles || []).includes("artist") ? "Remove Artist" : "Grant Artist"}
+                </button>
+                <button type="button" className="secondary-button" onClick={() => toggleRole(user, "listener", (user.roles || []).includes("listener"))}>
+                  {(user.roles || []).includes("listener") ? "Remove Listener" : "Grant Listener"}
+                </button>
+                <button type="button" className="secondary-button" onClick={() => toggleRole(user, "admin", (user.roles || []).includes("admin"))}>
+                  {(user.roles || []).includes("admin") ? "Remove Admin" : "Grant Admin"}
+                </button>
                 <button type="button" className="secondary-button" onClick={() => deleteUser(user)}>Delete User</button>
               </div>
             </li>

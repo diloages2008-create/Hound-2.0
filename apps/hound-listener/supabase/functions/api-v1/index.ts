@@ -31,6 +31,7 @@ type AuthContext = {
   userId: string;
   email: string | null;
   role: AppRole | null;
+  roles: AppRole[];
   adminScope: AdminScope | null;
   accountStatus: "active" | "suspended" | null;
 };
@@ -148,6 +149,24 @@ async function fetchAppUserById(userId: string) {
     .maybeSingle();
 }
 
+async function fetchUserRoles(userId: string, fallbackRole: AppRole | null) {
+  const res = await supabase
+    .from("user_roles")
+    .select("role")
+    .eq("user_id", userId);
+  if (res.error && isMissingTableError(res.error)) {
+    return fallbackRole ? [fallbackRole] : [];
+  }
+  if (res.error) {
+    throw new Error(res.error.message);
+  }
+  const values = (res.data ?? [])
+    .map((row: any) => row.role as AppRole)
+    .filter((value) => value === "artist" || value === "listener" || value === "admin");
+  if (values.length === 0 && fallbackRole) return [fallbackRole];
+  return Array.from(new Set(values));
+}
+
 async function parseJson(req: Request) {
   return await req.json().catch(() => ({}));
 }
@@ -182,7 +201,13 @@ async function ensureAuth(req: Request, requiredRole?: AppRole) {
   }
 
   const role = (appUser?.role as AppRole | null) ?? null;
-  if (requiredRole && role !== requiredRole) {
+  let roles: AppRole[] = [];
+  try {
+    roles = await fetchUserRoles(userId, role);
+  } catch (error) {
+    return { error: json({ error: error instanceof Error ? error.message : "failed to resolve roles" }, 400), context: null };
+  }
+  if (requiredRole && !roles.includes(requiredRole)) {
     return { error: json({ error: `forbidden: requires ${requiredRole} role` }, 403), context: null };
   }
 
@@ -190,6 +215,7 @@ async function ensureAuth(req: Request, requiredRole?: AppRole) {
     userId,
     email,
     role,
+    roles,
     adminScope: (appUser?.admin_scope as AdminScope | null) ?? null,
     accountStatus: (appUser?.account_status as "active" | "suspended" | null) ?? null
   };
@@ -206,11 +232,18 @@ async function resolveOptionalAuth(req: Request) {
   const userId = authData.user.id;
   const email = authData.user.email ?? null;
   const { data: appUser } = await fetchAppUserById(userId);
+  let roles: AppRole[] = [];
+  try {
+    roles = await fetchUserRoles(userId, (appUser?.role as AppRole | null) ?? null);
+  } catch {
+    roles = (appUser?.role ? [appUser.role as AppRole] : []);
+  }
 
   return {
     userId,
     email: appUser?.email ?? email,
     role: (appUser?.role as AppRole | null) ?? null,
+    roles,
     adminScope: (appUser?.admin_scope as AdminScope | null) ?? null,
     accountStatus: (appUser?.account_status as "active" | "suspended" | null) ?? null
   } satisfies AuthContext;
@@ -219,7 +252,7 @@ async function resolveOptionalAuth(req: Request) {
 async function ensureAdmin(req: Request, allowedScopes: AdminScope[] = []) {
   const auth = await ensureAuth(req);
   if (auth.error || !auth.context) return { error: auth.error, context: null };
-  if (auth.context.role !== "admin") {
+  if (!auth.context.roles.includes("admin")) {
     return { error: json({ error: "forbidden: admin role required" }, 403), context: null };
   }
   if (auth.context.accountStatus && auth.context.accountStatus !== "active") {
@@ -454,6 +487,13 @@ async function ensureAppUser(userId: string, email: string | null, role: AppRole
   return inserted;
 }
 
+async function grantUserRole(userId: string, role: AppRole) {
+  const { error } = await supabase
+    .from("user_roles")
+    .upsert({ user_id: userId, role }, { onConflict: "user_id,role", ignoreDuplicates: true });
+  if (error && !isMissingTableError(error)) throw new Error(error.message);
+}
+
 async function getArtistProfileByUserId(userId: string) {
   const { data: artist } = await supabase
     .from("artist_profiles")
@@ -474,6 +514,7 @@ async function createUserWithRole(email: string, password: string, role: AppRole
   }
 
   await ensureAppUser(createdUser.user.id, email, role);
+  await grantUserRole(createdUser.user.id, role);
 
   const { data: loginData, error: loginError } = await supabase.auth.signInWithPassword({
     email,
@@ -603,6 +644,7 @@ Deno.serve(async (req) => {
 
       const requestedRole: AppRole = routePath.includes("listener") ? "listener" : "artist";
       await ensureAppUser(loginData.user.id, loginData.user.email ?? null, requestedRole);
+      await grantUserRole(loginData.user.id, requestedRole);
 
       const { data: artistProfile } = await supabase
         .from("artist_profiles")
@@ -651,6 +693,7 @@ Deno.serve(async (req) => {
       if (adminUser.account_status && adminUser.account_status !== "active") {
         return json({ error: "admin account suspended" }, 403);
       }
+      await grantUserRole(loginData.user.id, "admin");
 
       await writeAdminAuditEvent({
         actorUserId: loginData.user.id,
@@ -694,6 +737,7 @@ Deno.serve(async (req) => {
         userId: auth.context.userId,
         email: auth.context.email,
         role: auth.context.role,
+        roles: auth.context.roles,
         adminScope: auth.context.adminScope,
         accountStatus: auth.context.accountStatus
       });
@@ -792,7 +836,7 @@ Deno.serve(async (req) => {
     if (req.method === "GET" && routePath === "/v1/operator/overview") {
       const auth = await ensureAuth(req);
       if (auth.error || !auth.context) return auth.error;
-      if (!auth.context.role || !["artist", "admin"].includes(auth.context.role)) {
+      if (!auth.context.roles.some((role) => ["artist", "admin"].includes(role))) {
         return json({ error: "forbidden: operator access requires artist/admin role" }, 403);
       }
 
@@ -2034,7 +2078,7 @@ Deno.serve(async (req) => {
       if (error) return json({ error: error.message }, 400);
 
       const userIds = (users ?? []).map((user: any) => user.user_id);
-      const [artistProfilesRes, savedRes, playsRes] = await Promise.all([
+      const [artistProfilesRes, savedRes, playsRes, userRolesRes] = await Promise.all([
         userIds.length
           ? supabase.from("artist_profiles").select("artist_id, user_id, stage_name").in("user_id", userIds)
           : Promise.resolve({ data: [], error: null } as any),
@@ -2043,13 +2087,23 @@ Deno.serve(async (req) => {
           : Promise.resolve({ data: [], error: null } as any),
         userIds.length
           ? supabase.from("listener_play_events").select("listener_user_id, created_at").in("listener_user_id", userIds)
+          : Promise.resolve({ data: [], error: null } as any),
+        userIds.length
+          ? supabase.from("user_roles").select("user_id, role").in("user_id", userIds)
           : Promise.resolve({ data: [], error: null } as any)
       ]);
       if (artistProfilesRes.error) return json({ error: artistProfilesRes.error.message }, 400);
       if (savedRes.error && !isMissingTableError(savedRes.error)) return json({ error: savedRes.error.message }, 400);
       if (playsRes.error && !isMissingTableError(playsRes.error)) return json({ error: playsRes.error.message }, 400);
+      if (userRolesRes.error && !isMissingTableError(userRolesRes.error)) return json({ error: userRolesRes.error.message }, 400);
 
       const artistByUserId = new Map((artistProfilesRes.data ?? []).map((artist: any) => [artist.user_id, artist]));
+      const rolesByUserId = new Map<string, AppRole[]>();
+      for (const row of userRolesRes.data ?? []) {
+        const list = rolesByUserId.get(row.user_id) ?? [];
+        if (!list.includes(row.role)) list.push(row.role);
+        rolesByUserId.set(row.user_id, list);
+      }
       const savesCountByUserId = new Map<string, number>();
       for (const row of savedRes.data ?? []) {
         if (!row.saved) continue;
@@ -2070,6 +2124,7 @@ Deno.serve(async (req) => {
           userId: user.user_id,
           email: user.email,
           role: user.role,
+          roles: rolesByUserId.get(user.user_id) ?? (user.role ? [user.role] : []),
           adminScope: user.admin_scope ?? null,
           accountStatus: user.account_status ?? "active",
           createdAt: user.created_at,
@@ -2110,6 +2165,52 @@ Deno.serve(async (req) => {
         .maybeSingle();
       if (targetUserError) return json({ error: targetUserError.message }, 400);
       if (!targetUser) return json({ error: "user not found" }, 404);
+
+      if (action === "grant_role" || action === "revoke_role") {
+        const roleRaw = toNonEmptyString(body.role).toLowerCase();
+        if (!["artist", "listener", "admin"].includes(roleRaw)) {
+          return json({ error: "role must be artist, listener, or admin" }, 400);
+        }
+        const roleValue = roleRaw as AppRole;
+        if (action === "grant_role") {
+          await grantUserRole(adminUserActionId, roleValue);
+          const patch: Record<string, unknown> = {};
+          if (roleValue === "admin") {
+            patch.role = "admin";
+            patch.account_status = targetUser.account_status ?? "active";
+          } else if (!targetUser.role || targetUser.role === "listener") {
+            patch.role = roleValue;
+          }
+          if (Object.keys(patch).length > 0) {
+            const { error: patchError } = await supabase.from("app_users").update(patch).eq("user_id", adminUserActionId);
+            if (patchError) return json({ error: patchError.message }, 400);
+          }
+        } else {
+          if (adminUserActionId === admin.context.userId && roleValue === "admin") {
+            return json({ error: "cannot remove your own admin role" }, 400);
+          }
+          const { error: deleteRoleError } = await supabase
+            .from("user_roles")
+            .delete()
+            .eq("user_id", adminUserActionId)
+            .eq("role", roleValue);
+          if (deleteRoleError && !isMissingTableError(deleteRoleError)) {
+            return json({ error: deleteRoleError.message }, 400);
+          }
+        }
+
+        const refreshedRoles = await fetchUserRoles(adminUserActionId, (targetUser.role as AppRole | null) ?? null);
+        await writeAdminAuditEvent({
+          actorUserId: admin.context.userId,
+          actorAdminScope: admin.context.adminScope,
+          action: `user_${action}`,
+          entityType: "user",
+          entityId: adminUserActionId,
+          reason,
+          metadata: { role: roleValue, roles: refreshedRoles }
+        });
+        return json({ ok: true, userId: adminUserActionId, roles: refreshedRoles });
+      }
 
       if (action === "suspend" || action === "reinstate") {
         const accountStatus = action === "suspend" ? "suspended" : "active";
@@ -3012,8 +3113,9 @@ Deno.serve(async (req) => {
     if (req.method === "POST" && routePath === "/v1/listener/telemetry/plays") {
       const auth = await ensureAuth(req);
       if (auth.error || !auth.context) return auth.error;
-      if (!auth.context.role) {
+      if (auth.context.roles.length === 0) {
         await ensureAppUser(auth.context.userId, auth.context.email, "listener");
+        await grantUserRole(auth.context.userId, "listener");
       }
 
       const body = await parseJson(req);
@@ -3042,8 +3144,9 @@ Deno.serve(async (req) => {
     if (req.method === "POST" && routePath === "/v1/listener/telemetry/events") {
       const auth = await ensureAuth(req);
       if (auth.error || !auth.context) return auth.error;
-      if (!auth.context.role) {
+      if (auth.context.roles.length === 0) {
         await ensureAppUser(auth.context.userId, auth.context.email, "listener");
+        await grantUserRole(auth.context.userId, "listener");
       }
 
       const body = await parseJson(req);
@@ -3068,8 +3171,9 @@ Deno.serve(async (req) => {
     if (req.method === "POST" && saveTrackId) {
       const auth = await ensureAuth(req);
       if (auth.error || !auth.context) return auth.error;
-      if (!auth.context.role) {
+      if (auth.context.roles.length === 0) {
         await ensureAppUser(auth.context.userId, auth.context.email, "listener");
+        await grantUserRole(auth.context.userId, "listener");
       }
 
       const body = await parseJson(req);
