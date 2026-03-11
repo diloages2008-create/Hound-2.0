@@ -134,6 +134,13 @@ function isMissingColumnError(error: { message?: string; code?: string } | null 
   return message.includes("column") && message.includes("does not exist");
 }
 
+function isPermissionDeniedError(error: { message?: string; code?: string } | null | undefined) {
+  if (!error) return false;
+  if (error.code === "42501") return true;
+  const message = String(error.message ?? "").toLowerCase();
+  return message.includes("permission denied");
+}
+
 async function fetchAppUserById(userId: string) {
   const primary = await supabase
     .from("app_users")
@@ -154,7 +161,7 @@ async function fetchUserRoles(userId: string, fallbackRole: AppRole | null) {
     .from("user_roles")
     .select("role")
     .eq("user_id", userId);
-  if (res.error && isMissingTableError(res.error)) {
+  if (res.error && (isMissingTableError(res.error) || isPermissionDeniedError(res.error))) {
     return fallbackRole ? [fallbackRole] : [];
   }
   if (res.error) {
@@ -491,7 +498,7 @@ async function grantUserRole(userId: string, role: AppRole) {
   const { error } = await supabase
     .from("user_roles")
     .upsert({ user_id: userId, role }, { onConflict: "user_id,role", ignoreDuplicates: true });
-  if (error && !isMissingTableError(error)) throw new Error(error.message);
+  if (error && !isMissingTableError(error) && !isPermissionDeniedError(error)) throw new Error(error.message);
 }
 
 async function getArtistProfileByUserId(userId: string) {
@@ -2095,7 +2102,9 @@ Deno.serve(async (req) => {
       if (artistProfilesRes.error) return json({ error: artistProfilesRes.error.message }, 400);
       if (savedRes.error && !isMissingTableError(savedRes.error)) return json({ error: savedRes.error.message }, 400);
       if (playsRes.error && !isMissingTableError(playsRes.error)) return json({ error: playsRes.error.message }, 400);
-      if (userRolesRes.error && !isMissingTableError(userRolesRes.error)) return json({ error: userRolesRes.error.message }, 400);
+      if (userRolesRes.error && !isMissingTableError(userRolesRes.error) && !isPermissionDeniedError(userRolesRes.error)) {
+        return json({ error: userRolesRes.error.message }, 400);
+      }
 
       const artistByUserId = new Map((artistProfilesRes.data ?? []).map((artist: any) => [artist.user_id, artist]));
       const rolesByUserId = new Map<string, AppRole[]>();
