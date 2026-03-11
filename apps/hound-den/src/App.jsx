@@ -68,22 +68,39 @@ export default function App() {
     <AdminGate>
       <Routes>
         <Route path="/auth" element={<DenAuth />} />
+        <Route path="/den/auth" element={<DenAuth />} />
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        <Route path="/den" element={<Navigate to="/dashboard" replace />} />
         <Route path="/dashboard" element={<DenShell><DenDashboard /></DenShell>} />
+        <Route path="/den/dashboard" element={<DenShell><DenDashboard /></DenShell>} />
         <Route path="/artists" element={<DenShell><DenArtists /></DenShell>} />
+        <Route path="/den/artists" element={<DenShell><DenArtists /></DenShell>} />
         <Route path="/releases" element={<DenShell><DenReleases /></DenShell>} />
+        <Route path="/den/releases" element={<DenShell><DenReleases /></DenShell>} />
         <Route path="/releases/:releaseId" element={<DenShell><DenReleaseDetail /></DenShell>} />
+        <Route path="/den/releases/:releaseId" element={<DenShell><DenReleaseDetail /></DenShell>} />
         <Route path="/jobs" element={<DenShell><DenJobs /></DenShell>} />
+        <Route path="/den/jobs" element={<DenShell><DenJobs /></DenShell>} />
         <Route path="/moderation" element={<DenShell><DenModeration /></DenShell>} />
+        <Route path="/den/moderation" element={<DenShell><DenModeration /></DenShell>} />
         <Route path="/reports" element={<DenShell><DenReports /></DenShell>} />
+        <Route path="/den/reports" element={<DenShell><DenReports /></DenShell>} />
         <Route path="/audit" element={<DenShell><DenAudit /></DenShell>} />
+        <Route path="/den/audit" element={<DenShell><DenAudit /></DenShell>} />
 
         <Route path="/assets" element={<DenShell><DenPlaceholder title="Tracks & Assets" description="Asset inventory and pipeline actions (retry transcode, replace asset, archive) live here." /></DenShell>} />
+        <Route path="/den/assets" element={<DenShell><DenPlaceholder title="Tracks & Assets" description="Asset inventory and pipeline actions (retry transcode, replace asset, archive) live here." /></DenShell>} />
         <Route path="/users" element={<DenShell><DenPlaceholder title="Users" description="Listener account controls and telemetry summaries are staged for Phase 2." /></DenShell>} />
+        <Route path="/den/users" element={<DenShell><DenPlaceholder title="Users" description="Listener account controls and telemetry summaries are staged for Phase 2." /></DenShell>} />
         <Route path="/catalog" element={<DenShell><DenPlaceholder title="Catalog" description="Editorial featuring, shelf curation, and visibility controls live here." /></DenShell>} />
+        <Route path="/den/catalog" element={<DenShell><DenPlaceholder title="Catalog" description="Editorial featuring, shelf curation, and visibility controls live here." /></DenShell>} />
         <Route path="/analytics" element={<DenShell><DenPlaceholder title="Analytics" description="Operational telemetry metrics are scaffolded here for Phase 2." /></DenShell>} />
+        <Route path="/den/analytics" element={<DenShell><DenPlaceholder title="Analytics" description="Operational telemetry metrics are scaffolded here for Phase 2." /></DenShell>} />
         <Route path="/system-health" element={<DenShell><DenPlaceholder title="System Health" description="API, DB, storage, worker, stream, and deploy health panels are staged here." /></DenShell>} />
+        <Route path="/den/system-health" element={<DenShell><DenPlaceholder title="System Health" description="API, DB, storage, worker, stream, and deploy health panels are staged here." /></DenShell>} />
         <Route path="/settings" element={<DenShell><DenPlaceholder title="Settings" description="Admin configuration, RBAC tuning, and 2FA readiness controls live here." /></DenShell>} />
+        <Route path="/den/settings" element={<DenShell><DenPlaceholder title="Settings" description="Admin configuration, RBAC tuning, and 2FA readiness controls live here." /></DenShell>} />
+        <Route path="*" element={<Navigate to="/auth" replace />} />
       </Routes>
     </AdminGate>
   );
