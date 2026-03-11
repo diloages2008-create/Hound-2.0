@@ -57,6 +57,16 @@ export default function DenReleaseDetail() {
     await load();
   };
 
+  const deleteReleasePermanently = async () => {
+    if (!releaseId || !release?.title) return;
+    const marker = window.prompt(`Type DELETE to permanently remove release "${release.title}" and all tracks.`);
+    if (marker !== "DELETE") return;
+    const reason = window.prompt("Reason for permanent release deletion:");
+    if (!reason) return;
+    await runAdminReleaseAction(releaseId, { action: "delete_permanent", reason });
+    window.location.href = "/releases";
+  };
+
   const deleteTrackPermanently = async (trackId, title) => {
     if (!trackId) return;
     const confirmText = window.prompt(`Type DELETE to permanently remove track "${title}" (${trackId}).`);
@@ -93,6 +103,7 @@ export default function DenReleaseDetail() {
             <button key={action} type="button" className="secondary-button" onClick={() => runAction(action)} disabled={busy}>{label}</button>
           ))}
           <button type="button" className="secondary-button" onClick={runSetPriority} disabled={busy}>Set Priority</button>
+          <button type="button" className="secondary-button" onClick={deleteReleasePermanently} disabled={busy}>Delete Release + Tracks</button>
           <button type="button" className="secondary-button" onClick={load} disabled={busy}>{busy ? "Refreshing..." : "Refresh"}</button>
         </div>
       </section>

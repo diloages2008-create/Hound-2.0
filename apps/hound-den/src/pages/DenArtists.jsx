@@ -31,6 +31,16 @@ export default function DenArtists() {
     await load();
   };
 
+  const deleteArtist = async (artist) => {
+    if (!artist?.artistId) return;
+    const marker = window.prompt(`Type DELETE to permanently remove artist "${artist.displayName}" and all linked music.`);
+    if (marker !== "DELETE") return;
+    const reason = window.prompt("Reason for permanent artist + music deletion:");
+    if (!reason) return;
+    await runAdminArtistAction(artist.artistId, { action: "delete_permanent", reason });
+    await load();
+  };
+
   return (
     <div className="page-wrap">
       <header className="page-header">
@@ -62,6 +72,7 @@ export default function DenArtists() {
                 <button type="button" className="secondary-button" onClick={() => runAction(artist.artistId, "reject_onboarding")}>Reject</button>
                 <button type="button" className="secondary-button" onClick={() => runAction(artist.artistId, "suspend")}>Suspend</button>
                 <button type="button" className="secondary-button" onClick={() => runAction(artist.artistId, "reinstate")}>Reinstate</button>
+                <button type="button" className="secondary-button" onClick={() => deleteArtist(artist)}>Delete Artist + Music</button>
               </div>
             </article>
           ))}

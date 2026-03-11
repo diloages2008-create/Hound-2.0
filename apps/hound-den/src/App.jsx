@@ -9,6 +9,7 @@ import DenJobs from "./pages/DenJobs.jsx";
 import DenModeration from "./pages/DenModeration.jsx";
 import DenReports from "./pages/DenReports.jsx";
 import DenAudit from "./pages/DenAudit.jsx";
+import DenUsers from "./pages/DenUsers.jsx";
 import DenPlaceholder from "./pages/DenPlaceholder.jsx";
 import DenShell from "./components/DenShell.jsx";
 import { getAuthMe, getRefreshToken, getToken } from "./lib/apiClient.js";
@@ -90,8 +91,8 @@ export default function App() {
 
         <Route path="/assets" element={<DenShell><DenPlaceholder title="Tracks & Assets" description="Asset inventory and pipeline actions (retry transcode, replace asset, archive) live here." /></DenShell>} />
         <Route path="/den/assets" element={<DenShell><DenPlaceholder title="Tracks & Assets" description="Asset inventory and pipeline actions (retry transcode, replace asset, archive) live here." /></DenShell>} />
-        <Route path="/users" element={<DenShell><DenPlaceholder title="Users" description="Listener account controls and telemetry summaries are staged for Phase 2." /></DenShell>} />
-        <Route path="/den/users" element={<DenShell><DenPlaceholder title="Users" description="Listener account controls and telemetry summaries are staged for Phase 2." /></DenShell>} />
+        <Route path="/users" element={<DenShell><DenUsers /></DenShell>} />
+        <Route path="/den/users" element={<DenShell><DenUsers /></DenShell>} />
         <Route path="/catalog" element={<DenShell><DenPlaceholder title="Catalog" description="Editorial featuring, shelf curation, and visibility controls live here." /></DenShell>} />
         <Route path="/den/catalog" element={<DenShell><DenPlaceholder title="Catalog" description="Editorial featuring, shelf curation, and visibility controls live here." /></DenShell>} />
         <Route path="/analytics" element={<DenShell><DenPlaceholder title="Analytics" description="Operational telemetry metrics are scaffolded here for Phase 2." /></DenShell>} />

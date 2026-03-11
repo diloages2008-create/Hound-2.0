@@ -257,6 +257,10 @@ async function writeAdminAuditEvent(options: {
   }
 }
 
+function isIgnorableDeleteError(error: { message?: string; code?: string } | null | undefined) {
+  return !error || isMissingTableError(error);
+}
+
 function toIsoOrNow(raw: unknown) {
   const value = typeof raw === "string" ? raw : String(raw ?? "");
   const parsed = Date.parse(value);
@@ -1146,11 +1150,93 @@ Deno.serve(async (req) => {
 
       const { data: artist, error: artistError } = await supabase
         .from("artist_profiles")
-        .select("artist_id, user_id, onboarding_status")
+        .select("artist_id, user_id, onboarding_status, stage_name")
         .eq("artist_id", adminArtistActionId)
         .maybeSingle();
       if (artistError) return json({ error: artistError.message }, 400);
       if (!artist) return json({ error: "artist not found" }, 404);
+
+      if (action === "delete_permanent") {
+        if (artist.user_id === admin.context.userId) {
+          return json({ error: "cannot permanently delete your own admin account" }, 400);
+        }
+
+        const { data: releases, error: releasesError } = await supabase
+          .from("releases")
+          .select("release_id")
+          .eq("artist_id", adminArtistActionId);
+        if (releasesError) return json({ error: releasesError.message }, 400);
+        const releaseIds = (releases ?? []).map((release: any) => release.release_id);
+
+        let trackIds: string[] = [];
+        if (releaseIds.length > 0) {
+          const { data: tracks, error: tracksError } = await supabase
+            .from("tracks")
+            .select("track_id")
+            .in("release_id", releaseIds);
+          if (tracksError) return json({ error: tracksError.message }, 400);
+          trackIds = (tracks ?? []).map((track: any) => track.track_id);
+        }
+
+        if (trackIds.length > 0) {
+          const cleanupTrackOps = await Promise.all([
+            supabase.from("track_credits").delete().in("track_id", trackIds),
+            supabase.from("listener_play_events").delete().in("track_id", trackIds),
+            supabase.from("listener_event_log").delete().in("track_id", trackIds),
+            supabase.from("listener_track_saves").delete().in("track_id", trackIds),
+            supabase.from("client_issue_reports").delete().in("track_id", trackIds),
+            supabase.from("moderation_flags").delete().eq("target_type", "track").in("target_id", trackIds)
+          ]);
+          for (const result of cleanupTrackOps) {
+            if (!isIgnorableDeleteError(result.error)) return json({ error: result.error?.message ?? "track cleanup failed" }, 400);
+          }
+        }
+
+        if (releaseIds.length > 0) {
+          const cleanupReleaseOps = await Promise.all([
+            supabase.from("transcode_jobs").delete().in("release_id", releaseIds),
+            supabase.from("client_issue_reports").delete().in("release_id", releaseIds),
+            supabase.from("moderation_flags").delete().eq("target_type", "release").in("target_id", releaseIds),
+            supabase.from("release_suggestions").delete().in("source_release_id", releaseIds),
+            supabase.from("release_suggestions").delete().in("target_release_id", releaseIds)
+          ]);
+          for (const result of cleanupReleaseOps) {
+            if (!isIgnorableDeleteError(result.error)) return json({ error: result.error?.message ?? "release cleanup failed" }, 400);
+          }
+        }
+
+        const cleanupArtistOps = await Promise.all([
+          supabase.from("releases").delete().eq("artist_id", adminArtistActionId),
+          supabase.from("artist_rights_attestations").delete().eq("artist_id", adminArtistActionId),
+          supabase.from("client_issue_reports").delete().eq("artist_id", adminArtistActionId),
+          supabase.from("moderation_flags").delete().eq("target_type", "artist").eq("target_id", adminArtistActionId),
+          supabase.from("artist_profiles").delete().eq("artist_id", adminArtistActionId)
+        ]);
+        for (const result of cleanupArtistOps) {
+          if (!isIgnorableDeleteError(result.error)) return json({ error: result.error?.message ?? "artist cleanup failed" }, 400);
+        }
+
+        const { error: appUserDeleteError } = await supabase
+          .from("app_users")
+          .delete()
+          .eq("user_id", artist.user_id);
+        if (appUserDeleteError) return json({ error: appUserDeleteError.message }, 400);
+
+        const authDeleteResult = await supabase.auth.admin.deleteUser(artist.user_id);
+        if (authDeleteResult.error) return json({ error: authDeleteResult.error.message }, 400);
+
+        await writeAdminAuditEvent({
+          actorUserId: admin.context.userId,
+          actorAdminScope: admin.context.adminScope,
+          action: "artist_delete_permanent",
+          entityType: "artist",
+          entityId: adminArtistActionId,
+          reason,
+          metadata: { stageName: artist.stage_name ?? null, releaseCount: releaseIds.length, trackCount: trackIds.length }
+        });
+
+        return json({ ok: true, artistId: adminArtistActionId, deleted: true });
+      }
 
       if (action === "verify") {
         const ownsMasters = body.ownsMasters !== false;
@@ -1386,7 +1472,57 @@ Deno.serve(async (req) => {
       if (!existing) return json({ error: "release not found" }, 404);
 
       const patch: Record<string, unknown> = { updated_at: nowIso(), moderation_notes: reason };
-      if (action === "approve") {
+      if (action === "delete_permanent") {
+        const { data: tracks, error: tracksReadError } = await supabase
+          .from("tracks")
+          .select("track_id")
+          .eq("release_id", adminReleaseActionId);
+        if (tracksReadError) return json({ error: tracksReadError.message }, 400);
+
+        const trackIds = (tracks ?? []).map((track: any) => track.track_id);
+        if (trackIds.length > 0) {
+          const cleanupTrackOps = await Promise.all([
+            supabase.from("track_credits").delete().in("track_id", trackIds),
+            supabase.from("listener_play_events").delete().in("track_id", trackIds),
+            supabase.from("listener_event_log").delete().in("track_id", trackIds),
+            supabase.from("listener_track_saves").delete().in("track_id", trackIds),
+            supabase.from("client_issue_reports").delete().in("track_id", trackIds),
+            supabase.from("moderation_flags").delete().eq("target_type", "track").in("target_id", trackIds)
+          ]);
+          for (const result of cleanupTrackOps) {
+            if (!isIgnorableDeleteError(result.error)) return json({ error: result.error?.message ?? "track cleanup failed" }, 400);
+          }
+        }
+
+        const cleanupReleaseOps = await Promise.all([
+          supabase.from("transcode_jobs").delete().eq("release_id", adminReleaseActionId),
+          supabase.from("client_issue_reports").delete().eq("release_id", adminReleaseActionId),
+          supabase.from("moderation_flags").delete().eq("target_type", "release").eq("target_id", adminReleaseActionId),
+          supabase.from("release_suggestions").delete().or(`source_release_id.eq.${adminReleaseActionId},target_release_id.eq.${adminReleaseActionId}`),
+          supabase.from("tracks").delete().eq("release_id", adminReleaseActionId)
+        ]);
+        for (const result of cleanupReleaseOps) {
+          if (!isIgnorableDeleteError(result.error)) return json({ error: result.error?.message ?? "release cleanup failed" }, 400);
+        }
+
+        const { error: releaseDeleteError } = await supabase
+          .from("releases")
+          .delete()
+          .eq("release_id", adminReleaseActionId);
+        if (releaseDeleteError) return json({ error: releaseDeleteError.message }, 400);
+
+        await writeAdminAuditEvent({
+          actorUserId: admin.context.userId,
+          actorAdminScope: admin.context.adminScope,
+          action: "release_delete_permanent",
+          entityType: "release",
+          entityId: adminReleaseActionId,
+          reason,
+          metadata: { fromStatus: existing.status, trackCount: trackIds.length }
+        });
+
+        return json({ ok: true, releaseId: adminReleaseActionId, deleted: true });
+      } else if (action === "approve") {
         patch.status = "in_transcode";
         patch.approved_at = nowIso();
       } else if (action === "reject") {
@@ -1876,6 +2012,174 @@ Deno.serve(async (req) => {
           createdAt: event.created_at
         }))
       });
+    }
+
+    if (req.method === "GET" && routePath === "/v1/admin/users") {
+      const admin = await ensureAdmin(req);
+      if (admin.error || !admin.context) return admin.error;
+      const url = new URL(req.url);
+      const q = toNonEmptyString(url.searchParams.get("q") ?? "").toLowerCase();
+      const roleFilter = toNonEmptyString(url.searchParams.get("role") ?? "").toLowerCase();
+      const limitRaw = Number(url.searchParams.get("limit") ?? "120");
+      const limit = Math.max(1, Math.min(300, Number.isFinite(limitRaw) ? limitRaw : 120));
+
+      let queryBuilder = supabase
+        .from("app_users")
+        .select("user_id, email, role, admin_scope, account_status, created_at, last_active_at")
+        .order("created_at", { ascending: false })
+        .limit(limit);
+      if (roleFilter) queryBuilder = queryBuilder.eq("role", roleFilter);
+
+      const { data: users, error } = await queryBuilder;
+      if (error) return json({ error: error.message }, 400);
+
+      const userIds = (users ?? []).map((user: any) => user.user_id);
+      const [artistProfilesRes, savedRes, playsRes] = await Promise.all([
+        userIds.length
+          ? supabase.from("artist_profiles").select("artist_id, user_id, stage_name").in("user_id", userIds)
+          : Promise.resolve({ data: [], error: null } as any),
+        userIds.length
+          ? supabase.from("listener_track_saves").select("listener_user_id, saved").in("listener_user_id", userIds)
+          : Promise.resolve({ data: [], error: null } as any),
+        userIds.length
+          ? supabase.from("listener_play_events").select("listener_user_id, created_at").in("listener_user_id", userIds)
+          : Promise.resolve({ data: [], error: null } as any)
+      ]);
+      if (artistProfilesRes.error) return json({ error: artistProfilesRes.error.message }, 400);
+      if (savedRes.error && !isMissingTableError(savedRes.error)) return json({ error: savedRes.error.message }, 400);
+      if (playsRes.error && !isMissingTableError(playsRes.error)) return json({ error: playsRes.error.message }, 400);
+
+      const artistByUserId = new Map((artistProfilesRes.data ?? []).map((artist: any) => [artist.user_id, artist]));
+      const savesCountByUserId = new Map<string, number>();
+      for (const row of savedRes.data ?? []) {
+        if (!row.saved) continue;
+        savesCountByUserId.set(row.listener_user_id, (savesCountByUserId.get(row.listener_user_id) ?? 0) + 1);
+      }
+      const playsCountByUserId = new Map<string, number>();
+      let latestPlayByUserId = new Map<string, string>();
+      for (const row of playsRes.data ?? []) {
+        playsCountByUserId.set(row.listener_user_id, (playsCountByUserId.get(row.listener_user_id) ?? 0) + 1);
+        const existing = latestPlayByUserId.get(row.listener_user_id);
+        if (!existing || new Date(row.created_at).getTime() > new Date(existing).getTime()) {
+          latestPlayByUserId.set(row.listener_user_id, row.created_at);
+        }
+      }
+
+      const filtered = (users ?? [])
+        .map((user: any) => ({
+          userId: user.user_id,
+          email: user.email,
+          role: user.role,
+          adminScope: user.admin_scope ?? null,
+          accountStatus: user.account_status ?? "active",
+          createdAt: user.created_at,
+          lastActiveAt: user.last_active_at ?? latestPlayByUserId.get(user.user_id) ?? null,
+          artistId: artistByUserId.get(user.user_id)?.artist_id ?? null,
+          artistName: artistByUserId.get(user.user_id)?.stage_name ?? null,
+          savedLibraryCount: savesCountByUserId.get(user.user_id) ?? 0,
+          telemetrySummary: { playEvents: playsCountByUserId.get(user.user_id) ?? 0 }
+        }))
+        .filter((user: any) => {
+          if (!q) return true;
+          return (
+            String(user.userId).toLowerCase().includes(q) ||
+            String(user.email).toLowerCase().includes(q) ||
+            String(user.artistName ?? "").toLowerCase().includes(q)
+          );
+        });
+
+      return json({ users: filtered });
+    }
+
+    const adminUserActionId = getPathParam(routePath, /^\/v1\/admin\/users\/([0-9a-f-]+)\/actions$/i);
+    if (req.method === "POST" && adminUserActionId) {
+      const admin = await ensureAdmin(req, ["super_admin", "ops_admin"]);
+      if (admin.error || !admin.context) return admin.error;
+      const body = await parseJson(req);
+      const action = toNonEmptyString(body.action).toLowerCase();
+      const reason = toNonEmptyString(body.reason).slice(0, 1024);
+      if (!reason) return json({ error: "reason is required for user actions" }, 400);
+      if (adminUserActionId === admin.context.userId && action === "delete_permanent") {
+        return json({ error: "cannot permanently delete your own admin account" }, 400);
+      }
+
+      const { data: targetUser, error: targetUserError } = await supabase
+        .from("app_users")
+        .select("user_id, email, role, admin_scope, account_status")
+        .eq("user_id", adminUserActionId)
+        .maybeSingle();
+      if (targetUserError) return json({ error: targetUserError.message }, 400);
+      if (!targetUser) return json({ error: "user not found" }, 404);
+
+      if (action === "suspend" || action === "reinstate") {
+        const accountStatus = action === "suspend" ? "suspended" : "active";
+        const { data: updatedUser, error: userError } = await supabase
+          .from("app_users")
+          .update({ account_status: accountStatus })
+          .eq("user_id", adminUserActionId)
+          .select("user_id, account_status")
+          .single();
+        if (userError || !updatedUser) return json({ error: userError?.message ?? "failed to update account status" }, 400);
+        await writeAdminAuditEvent({
+          actorUserId: admin.context.userId,
+          actorAdminScope: admin.context.adminScope,
+          action: `user_${action}`,
+          entityType: "user",
+          entityId: adminUserActionId,
+          reason
+        });
+        return json({ ok: true, account: updatedUser });
+      }
+
+      if (action === "delete_permanent") {
+        if (targetUser.role === "admin") {
+          return json({ error: "permanent deletion for admin users is blocked" }, 400);
+        }
+
+        const { data: artistProfile, error: artistProfileError } = await supabase
+          .from("artist_profiles")
+          .select("artist_id")
+          .eq("user_id", adminUserActionId)
+          .maybeSingle();
+        if (artistProfileError) return json({ error: artistProfileError.message }, 400);
+
+        if (artistProfile?.artist_id) {
+          return json({ error: "user is linked to an artist profile; delete it from Artists page with delete_permanent" }, 400);
+        }
+
+        const cleanupOps = await Promise.all([
+          supabase.from("listener_play_events").delete().eq("listener_user_id", adminUserActionId),
+          supabase.from("listener_event_log").delete().eq("listener_user_id", adminUserActionId),
+          supabase.from("listener_track_saves").delete().eq("listener_user_id", adminUserActionId),
+          supabase.from("client_issue_reports").delete().eq("user_id", adminUserActionId),
+          supabase.from("upload_assets").delete().eq("owner_user_id", adminUserActionId)
+        ]);
+        for (const result of cleanupOps) {
+          if (!isIgnorableDeleteError(result.error)) return json({ error: result.error?.message ?? "user cleanup failed" }, 400);
+        }
+
+        const { error: appUserDeleteError } = await supabase
+          .from("app_users")
+          .delete()
+          .eq("user_id", adminUserActionId);
+        if (appUserDeleteError) return json({ error: appUserDeleteError.message }, 400);
+
+        const authDeleteResult = await supabase.auth.admin.deleteUser(adminUserActionId);
+        if (authDeleteResult.error) return json({ error: authDeleteResult.error.message }, 400);
+
+        await writeAdminAuditEvent({
+          actorUserId: admin.context.userId,
+          actorAdminScope: admin.context.adminScope,
+          action: "user_delete_permanent",
+          entityType: "user",
+          entityId: adminUserActionId,
+          reason,
+          metadata: { role: targetUser.role, email: targetUser.email }
+        });
+        return json({ ok: true, userId: adminUserActionId, deleted: true });
+      }
+
+      return json({ error: `unsupported user action: ${action}` }, 400);
     }
 
     if (req.method === "GET" && routePath === "/v1/admin/search") {

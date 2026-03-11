@@ -139,6 +139,22 @@ export async function runAdminArtistAction(artistId, body) {
   }, true);
 }
 
+export async function listAdminUsers(params = {}) {
+  const search = new URLSearchParams();
+  if (params.q) search.set("q", params.q);
+  if (params.role) search.set("role", params.role);
+  if (params.limit) search.set("limit", String(params.limit));
+  const query = search.toString();
+  return request(`/v1/admin/users${query ? `?${query}` : ""}`, { method: "GET" }, true);
+}
+
+export async function runAdminUserAction(userId, body) {
+  return request(`/v1/admin/users/${userId}/actions`, {
+    method: "POST",
+    body: JSON.stringify(body)
+  }, true);
+}
+
 export async function listAdminReleases(params = {}) {
   const search = new URLSearchParams();
   if (params.q) search.set("q", params.q);

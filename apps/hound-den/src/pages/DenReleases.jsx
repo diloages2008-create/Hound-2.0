@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { listAdminReleases } from "../lib/apiClient.js";
+import { listAdminReleases, runAdminReleaseAction } from "../lib/apiClient.js";
 
 const statuses = ["all", "draft", "submitted", "in_transcode", "live", "rejected", "hidden"];
 
@@ -28,6 +28,15 @@ export default function DenReleases() {
     load();
   }, []);
 
+  const deleteRelease = async (release) => {
+    const marker = window.prompt(`Type DELETE to permanently remove release "${release.title}".`);
+    if (marker !== "DELETE") return;
+    const reason = window.prompt("Reason for permanent release deletion:");
+    if (!reason) return;
+    await runAdminReleaseAction(release.releaseId, { action: "delete_permanent", reason });
+    await load();
+  };
+
   return (
     <div className="page-wrap">
       <header className="page-header">
@@ -50,7 +59,10 @@ export default function DenReleases() {
               <span>
                 {release.type} | {release.status} | tracks: {release.trackCount} | hidden: {String(release.isHidden)}
               </span>
-              <span><Link to={`/releases/${release.releaseId}`}>Open detail</Link></span>
+              <div className="album-actions">
+                <span><Link to={`/releases/${release.releaseId}`}>Open detail</Link></span>
+                <button type="button" className="secondary-button" onClick={() => deleteRelease(release)}>Delete</button>
+              </div>
             </li>
           ))}
         </ol>
