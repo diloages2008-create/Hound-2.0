@@ -48,6 +48,7 @@ apps/**/electron/ffmpeg/
 # Supabase local artifacts
 apps/**/supabase/.temp/
 apps/**/supabase/supabase.exe
+supabase/.temp/
 
 # Local runtime data
 apps/hound-listener/data/
