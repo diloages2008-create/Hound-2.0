@@ -210,3 +210,35 @@ export function evaluateSessionSummary({ tracks = [], events = [] }) {
 
   return { tracks: nextTracks, updates, worldSuggestions };
 }
+
+const ORBIT_PRIORITY = {
+  orbit_1: 0,
+  orbit_2: 1,
+  orbit_3: 2
+};
+
+function getOrbitPriority(track) {
+  if (track?.globalOrbit === LISTENER_GLOBAL_FAVORITES_ORBIT) return -1;
+  return ORBIT_PRIORITY[track?.worldOrbit] ?? 3;
+}
+
+export function selectNextRecommendedTrack({ tracks = [], currentTrackId = null, timeline = [] }) {
+  const pool = (tracks || []).filter((track) => track && !track.archivedAt && track.id && track.id !== currentTrackId);
+  if (!pool.length) return null;
+
+  const recentIds = new Set((timeline || []).slice(-8));
+  const notRecent = pool.filter((track) => !recentIds.has(track.id));
+  const candidates = notRecent.length ? notRecent : pool;
+
+  const sorted = [...candidates].sort((a, b) => {
+    const orbitDelta = getOrbitPriority(a) - getOrbitPriority(b);
+    if (orbitDelta !== 0) return orbitDelta;
+
+    const scoreDelta = Number(b.rotationScore || 0) - Number(a.rotationScore || 0);
+    if (scoreDelta !== 0) return scoreDelta;
+
+    return String(a.id).localeCompare(String(b.id));
+  });
+
+  return sorted[0] || null;
+}

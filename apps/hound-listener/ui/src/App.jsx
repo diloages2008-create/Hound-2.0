@@ -1,5 +1,6 @@
 ﻿import React, { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { createLibraryProvider, PROVIDER_MODE } from "./libraryProvider.js";
+import { selectNextRecommendedTrack } from "./rulesEngineBridge.js";
 
 const NAV = [
   { key: "now", label: "Now Playing" },
@@ -255,11 +256,11 @@ export default function App() {
   };
 
   const chooseRecommendation = () => {
-    const pool = activeTracks.filter((t) => t.id !== currentTrack?.id);
-    if (!pool.length) return null;
-    const notRecent = pool.filter((t) => !transport.timeline.slice(-8).includes(t.id));
-    const candidates = notRecent.length ? notRecent : pool;
-    return candidates[Math.floor(Math.random() * candidates.length)] || null;
+    return selectNextRecommendedTrack({
+      tracks: activeTracks,
+      currentTrackId: currentTrack?.id || null,
+      timeline: transport.timeline
+    });
   };
 
   const moveToTimelineTrack = (nextIndex, source) => {
