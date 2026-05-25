@@ -9,7 +9,8 @@ param(
   [string]$CoverFilePath = "",
   [string]$ReleaseTitle = "Codex Verification Release",
   [int]$PublishTimeoutSec = 600,
-  [int]$PollIntervalSec = 8
+  [int]$PollIntervalSec = 8,
+  [switch]$AllowSignupFallback
 )
 
 $ErrorActionPreference = "Stop"
@@ -112,7 +113,10 @@ try {
     password = $StudioPassword
   }
 } catch {
-  Write-Host "Artist login failed, attempting signup..."
+  if (-not $AllowSignupFallback) {
+    throw "Artist login failed and signup fallback is disabled. Create beta user first or pass -AllowSignupFallback."
+  }
+  Write-Host "Artist login failed, attempting signup fallback..."
   $studioLogin = Invoke-ApiJson -Method "POST" -Url "$ApiBase/v1/auth/artist/signup" -Headers (New-JsonHeaders) -Body @{
     email = $StudioEmail
     password = $StudioPassword
@@ -211,7 +215,10 @@ try {
     password = $ListenerPassword
   }
 } catch {
-  Write-Host "Listener login failed, attempting signup..."
+  if (-not $AllowSignupFallback) {
+    throw "Listener login failed and signup fallback is disabled. Create beta user first or pass -AllowSignupFallback."
+  }
+  Write-Host "Listener login failed, attempting signup fallback..."
   $listenerLogin = Invoke-ApiJson -Method "POST" -Url "$ApiBase/v1/auth/listener/signup" -Headers (New-JsonHeaders) -Body @{
     email = $ListenerEmail
     password = $ListenerPassword

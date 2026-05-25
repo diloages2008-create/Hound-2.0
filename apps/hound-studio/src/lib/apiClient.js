@@ -1,4 +1,5 @@
 import { mockStudioRequest } from "./mockApi.js";
+import { recordStudioAction, recordStudioError } from "./diagnostics.js";
 
 const API_BASE =
   import.meta.env.VITE_HOUND_API_BASE ||
@@ -22,6 +23,10 @@ function getToken() {
 
 function getRefreshToken() {
   return readStorage(REFRESH_KEY);
+}
+
+function hasSession() {
+  return Boolean(getToken() || getRefreshToken());
 }
 
 function setSession(accessToken, refreshToken = "", rememberMe = true) {
@@ -67,9 +72,11 @@ async function rawRequest(path, options = {}, auth = false) {
   }
 
   if (API_MODE === "mock") {
+    recordStudioAction("api_request", { path, method: options.method || "GET", mode: "mock" });
     return mockStudioRequest(path, { ...options, headers });
   }
 
+  recordStudioAction("api_request", { path, method: options.method || "GET", mode: "live" });
   const response = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers
@@ -81,8 +88,10 @@ async function rawRequest(path, options = {}, auth = false) {
     error.status = response.status;
     error.details = payload.details || null;
     error.payload = payload || null;
+    recordStudioError(error);
     throw error;
   }
+  recordStudioAction("api_success", { path, status: response.status });
   return payload;
 }
 
@@ -99,6 +108,9 @@ async function refreshSession() {
 
 async function request(path, options = {}, auth = false) {
   try {
+    if (auth && !getToken() && getRefreshToken()) {
+      await refreshSession();
+    }
     return await rawRequest(path, options, auth);
   } catch (error) {
     if (auth && error?.status === 401) {
@@ -140,6 +152,16 @@ export async function signupListener(body) {
 export async function loginArtist(body) {
   const rememberMe = body?.rememberMe !== false;
   const result = await request("/v1/auth/artist/login", {
+    method: "POST",
+    body: JSON.stringify(body)
+  });
+  setSession(result.accessToken || "", result.refreshToken || "", rememberMe);
+  return result;
+}
+
+export async function loginAdmin(body) {
+  const rememberMe = body?.rememberMe !== false;
+  const result = await request("/v1/auth/admin/login", {
     method: "POST",
     body: JSON.stringify(body)
   });
@@ -219,6 +241,10 @@ export async function submitRelease(releaseId, body) {
   }, true);
 }
 
+export async function getReleaseReadiness(releaseId) {
+  return request(`/v1/studio/releases/${releaseId}/readiness`, { method: "GET" }, true);
+}
+
 export async function publishRelease(releaseId) {
   return request(`/v1/studio/releases/${releaseId}/publish`, { method: "POST" }, true);
 }
@@ -231,4 +257,123 @@ export async function deleteStudioTrack(trackId) {
   return request(`/v1/studio/tracks/${trackId}`, { method: "DELETE" }, true);
 }
 
-export { API_BASE, API_MODE, getToken, getRefreshToken, clearSession, setSession, setToken };
+export async function reportClientIssue(payload = {}) {
+  const body = {
+    app: "studio",
+    ...payload
+  };
+  return request(
+    "/v1/client/issues",
+    {
+      method: "POST",
+      body: JSON.stringify(body)
+    },
+    Boolean(getToken())
+  );
+}
+
+export async function getOperatorOverview() {
+  return request("/v1/operator/overview", { method: "GET" }, true);
+}
+
+export async function getAdminDashboard() {
+  return request("/v1/admin/dashboard", { method: "GET" }, true);
+}
+
+export async function listAdminArtists(params = {}) {
+  const search = new URLSearchParams();
+  if (params.q) search.set("q", params.q);
+  if (params.limit) search.set("limit", String(params.limit));
+  const query = search.toString();
+  return request(`/v1/admin/artists${query ? `?${query}` : ""}`, { method: "GET" }, true);
+}
+
+export async function runAdminArtistAction(artistId, body) {
+  return request(`/v1/admin/artists/${artistId}/actions`, {
+    method: "POST",
+    body: JSON.stringify(body)
+  }, true);
+}
+
+export async function listAdminReleases(params = {}) {
+  const search = new URLSearchParams();
+  if (params.q) search.set("q", params.q);
+  if (params.status) search.set("status", params.status);
+  if (params.limit) search.set("limit", String(params.limit));
+  const query = search.toString();
+  return request(`/v1/admin/releases${query ? `?${query}` : ""}`, { method: "GET" }, true);
+}
+
+export async function getAdminRelease(releaseId) {
+  return request(`/v1/admin/releases/${releaseId}`, { method: "GET" }, true);
+}
+
+export async function runAdminReleaseAction(releaseId, body) {
+  return request(`/v1/admin/releases/${releaseId}/actions`, {
+    method: "POST",
+    body: JSON.stringify(body)
+  }, true);
+}
+
+export async function listAdminJobs(params = {}) {
+  const search = new URLSearchParams();
+  if (params.status) search.set("status", params.status);
+  if (params.limit) search.set("limit", String(params.limit));
+  const query = search.toString();
+  return request(`/v1/admin/jobs${query ? `?${query}` : ""}`, { method: "GET" }, true);
+}
+
+export async function runAdminJobAction(jobId, body) {
+  return request(`/v1/admin/jobs/${jobId}/actions`, {
+    method: "POST",
+    body: JSON.stringify(body)
+  }, true);
+}
+
+export async function listAdminModerationFlags(params = {}) {
+  const search = new URLSearchParams();
+  if (params.status) search.set("status", params.status);
+  if (params.limit) search.set("limit", String(params.limit));
+  const query = search.toString();
+  return request(`/v1/admin/moderation/flags${query ? `?${query}` : ""}`, { method: "GET" }, true);
+}
+
+export async function runAdminModerationAction(flagId, body) {
+  return request(`/v1/admin/moderation/flags/${flagId}/actions`, {
+    method: "POST",
+    body: JSON.stringify(body)
+  }, true);
+}
+
+export async function listAdminReports(params = {}) {
+  const search = new URLSearchParams();
+  if (params.q) search.set("q", params.q);
+  if (params.category) search.set("category", params.category);
+  if (params.app) search.set("app", params.app);
+  if (params.limit) search.set("limit", String(params.limit));
+  const query = search.toString();
+  return request(`/v1/admin/reports${query ? `?${query}` : ""}`, { method: "GET" }, true);
+}
+
+export async function createModerationFlagFromReport(reportId, body) {
+  return request(`/v1/admin/reports/${reportId}/flag`, {
+    method: "POST",
+    body: JSON.stringify(body)
+  }, true);
+}
+
+export async function listAdminAuditEvents(params = {}) {
+  const search = new URLSearchParams();
+  if (params.limit) search.set("limit", String(params.limit));
+  const query = search.toString();
+  return request(`/v1/admin/audit${query ? `?${query}` : ""}`, { method: "GET" }, true);
+}
+
+export async function searchAdminEverything(params = {}) {
+  const search = new URLSearchParams();
+  if (params.q) search.set("q", params.q);
+  const query = search.toString();
+  return request(`/v1/admin/search${query ? `?${query}` : ""}`, { method: "GET" }, true);
+}
+
+export { API_BASE, API_MODE, getToken, getRefreshToken, hasSession, clearSession, setSession, setToken };

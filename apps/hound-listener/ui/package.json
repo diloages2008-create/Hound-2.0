@@ -6,9 +6,11 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:transport": "node --test src/transport.timeline.test.mjs"
   },
   "dependencies": {
+    "@hound/rules-engine": "*",
     "hls.js": "^1.5.18",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"

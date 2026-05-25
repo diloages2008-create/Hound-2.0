@@ -4,7 +4,7 @@ import {
   analyticsSnapshot,
   featuredCollections
 } from "../data/studioData.js";
-import { API_BASE, getToken, listStudioReleases } from "../lib/apiClient.js";
+import { hasSession, listStudioReleases } from "../lib/apiClient.js";
 
 const metrics = [
   { label: "Plays", value: analyticsSnapshot.plays.toLocaleString() },
@@ -15,13 +15,12 @@ const metrics = [
 ];
 
 export default function Dashboard() {
-  const apiMode = import.meta.env.VITE_HOUND_API_MODE || "live";
   const [releases, setReleases] = useState([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   const loadReleases = async () => {
-    if (!getToken()) return;
+    if (!hasSession()) return;
     setBusy(true);
     setError("");
     try {
@@ -50,7 +49,7 @@ export default function Dashboard() {
       <header className="page-header">
         <p className="eyebrow">Artist Experience</p>
         <h1>Studio Dashboard</h1>
-        <p>Mode: <code>{apiMode}</code> | Backend: <code>{API_BASE}</code></p>
+        <p>Track your catalog health, engagement, and release momentum.</p>
       </header>
 
       <section className="panel-grid panel-grid-double">
@@ -88,11 +87,11 @@ export default function Dashboard() {
             <div className="metric-card"><small>Draft</small><strong>{releaseSummary.draft}</strong></div>
           </div>
           <div className="album-actions">
-            <button type="button" className="secondary-button" onClick={loadReleases} disabled={busy || !getToken()}>
+            <button type="button" className="secondary-button" onClick={loadReleases} disabled={busy || !hasSession()}>
               {busy ? "Refreshing..." : "Refresh Catalog"}
             </button>
           </div>
-          {!getToken() ? <p>Login in Profile to load catalog stats.</p> : null}
+          {!hasSession() ? <p>Login in Profile to load catalog stats.</p> : null}
           {error ? <p style={{ color: "#a40000" }}>{error}</p> : null}
         </article>
 

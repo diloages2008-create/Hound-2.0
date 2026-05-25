@@ -11,6 +11,10 @@ const STREAMS_BUCKET = process.env.STORAGE_BUCKET_STREAMS || "hound-streams";
 const POLL_MS = Number(process.env.WORKER_POLL_MS || 3000);
 const WORKER_ID = process.env.WORKER_ID || `worker-${process.pid}`;
 const CONCURRENCY = Math.max(1, Number(process.env.WORKER_CONCURRENCY || 1));
+const RECONCILE_MS = Math.max(15000, Number(process.env.WORKER_RECONCILE_MS || 60000));
+const RECONCILE_RELEASE_LIMIT = Math.max(1, Number(process.env.WORKER_RECONCILE_RELEASE_LIMIT || 100));
+const RESCUE_MAX_ATTEMPTS = Math.max(3, Number(process.env.WORKER_RESCUE_MAX_ATTEMPTS || 8));
+const STALE_JOB_MINUTES = Math.max(2, Number(process.env.WORKER_STALE_JOB_MINUTES || 15));
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE) {
   console.error("Missing Supabase envs: SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY (EDGE_* aliases still supported)");
@@ -18,6 +22,12 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE) {
 }
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE, { auth: { persistSession: false } });
+
+function isMissingColumnError(error) {
+  if (!error) return false;
+  const message = String(error.message || "").toLowerCase();
+  return message.includes("column") && message.includes("does not exist");
+}
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -77,6 +87,191 @@ async function fetchJob() {
 async function updateJob(jobId, patch) {
   const { error } = await supabase.from("transcode_jobs").update({ ...patch, updated_at: new Date().toISOString() }).eq("job_id", jobId);
   if (error) throw new Error(error.message);
+}
+
+async function tryAutoPublishRelease(releaseId) {
+  if (!releaseId) return false;
+
+  const nowIso = new Date().toISOString();
+  const { data: release, error: releaseError } = await supabase
+    .from("releases")
+    .select("release_id, status")
+    .eq("release_id", releaseId)
+    .maybeSingle();
+  if (releaseError) throw new Error(releaseError.message);
+  if (!release || release.status !== "in_transcode") return false;
+
+  const { data: tracks, error: tracksError } = await supabase
+    .from("tracks")
+    .select("track_id, master_asset_id, stream_manifest_path, duration_sec, loudness_lufs")
+    .eq("release_id", releaseId);
+  if (tracksError) throw new Error(tracksError.message);
+  if (!Array.isArray(tracks) || tracks.length === 0) return false;
+
+  const masterAssetIds = tracks
+    .map((track) => track.master_asset_id)
+    .filter((id) => typeof id === "string" && id.length > 0);
+  if (masterAssetIds.length !== tracks.length) return false;
+
+  const { data: masterAssets, error: assetsError } = await supabase
+    .from("upload_assets")
+    .select("asset_id, status")
+    .in("asset_id", masterAssetIds);
+  if (assetsError) throw new Error(assetsError.message);
+  const statusByAssetId = new Map((masterAssets || []).map((asset) => [asset.asset_id, asset.status]));
+
+  const allTracksReady = tracks.every((track) => {
+    const manifestReady = Boolean(track.stream_manifest_path);
+    const durationReady = Number.isFinite(Number(track.duration_sec)) && Number(track.duration_sec) > 0;
+    const loudnessReady = Number.isFinite(Number(track.loudness_lufs));
+    const masterProcessed = statusByAssetId.get(track.master_asset_id) === "processed";
+    return manifestReady && durationReady && loudnessReady && masterProcessed;
+  });
+  if (!allTracksReady) return false;
+
+  const { data: pendingJobs, error: jobsError } = await supabase
+    .from("transcode_jobs")
+    .select("job_id")
+    .eq("release_id", releaseId)
+    .in("status", ["queued", "in_progress", "failed"]);
+  if (jobsError) throw new Error(jobsError.message);
+  if (Array.isArray(pendingJobs) && pendingJobs.length > 0) return false;
+
+  let publishPatch = {
+    status: "live",
+    published_at: nowIso,
+    approved_at: nowIso,
+    updated_at: nowIso
+  };
+  let publish = await supabase
+    .from("releases")
+    .update(publishPatch)
+    .eq("release_id", releaseId)
+    .eq("status", "in_transcode")
+    .select("release_id")
+    .maybeSingle();
+
+  // Backward-compatible fallback for environments that have not applied
+  // all admin metadata columns yet.
+  if (publish.error && isMissingColumnError(publish.error)) {
+    publishPatch = {
+      status: "live",
+      updated_at: nowIso
+    };
+    publish = await supabase
+      .from("releases")
+      .update(publishPatch)
+      .eq("release_id", releaseId)
+      .eq("status", "in_transcode")
+      .select("release_id")
+      .maybeSingle();
+  }
+  if (publish.error) throw new Error(publish.error.message);
+
+  return Boolean(publish.data?.release_id);
+}
+
+async function rescueFailedJobsForRelease(releaseId) {
+  const { data: jobs, error } = await supabase
+    .from("transcode_jobs")
+    .select("job_id, status, attempts, max_attempts, next_retry_at, locked_at, updated_at")
+    .eq("release_id", releaseId)
+    .in("status", ["failed", "in_progress"])
+    .order("updated_at", { ascending: true })
+    .limit(300);
+  if (error) throw new Error(error.message);
+  if (!Array.isArray(jobs) || jobs.length === 0) return 0;
+
+  const staleCutoffMs = Date.now() - STALE_JOB_MINUTES * 60 * 1000;
+  let rescued = 0;
+
+  for (const job of jobs) {
+    const attempts = Number(job.attempts || 0);
+    const maxAttempts = Number(job.max_attempts || 3);
+    const nextRetryAtMs = Date.parse(String(job.next_retry_at || ""));
+    const lockedAtMs = Date.parse(String(job.locked_at || job.updated_at || ""));
+    const isStale = Number.isFinite(lockedAtMs) && lockedAtMs <= staleCutoffMs;
+
+    if (job.status === "failed") {
+      const canRetryNormally = attempts < maxAttempts;
+      const canExtendBudget = maxAttempts < RESCUE_MAX_ATTEMPTS;
+      if (!canRetryNormally && !canExtendBudget) continue;
+
+      const nextMax = canRetryNormally ? maxAttempts : Math.max(maxAttempts + 1, Math.min(RESCUE_MAX_ATTEMPTS, attempts + 1));
+      const shouldWakeNow = !Number.isFinite(nextRetryAtMs) || nextRetryAtMs > Date.now();
+      const patch = {
+        status: "queued",
+        max_attempts: nextMax,
+        locked_at: null,
+        locked_by: null,
+        next_retry_at: shouldWakeNow ? new Date().toISOString() : job.next_retry_at,
+        error_message: `rescued by reconciler at ${new Date().toISOString()}`
+      };
+      const { error: updateError } = await supabase.from("transcode_jobs").update(patch).eq("job_id", job.job_id);
+      if (updateError) throw new Error(updateError.message);
+      rescued += 1;
+      continue;
+    }
+
+    if (job.status === "in_progress" && isStale) {
+      const { error: updateError } = await supabase
+        .from("transcode_jobs")
+        .update({
+          status: "queued",
+          locked_at: null,
+          locked_by: null,
+          next_retry_at: new Date().toISOString(),
+          error_message: `requeued stale in_progress job at ${new Date().toISOString()}`
+        })
+        .eq("job_id", job.job_id)
+        .eq("status", "in_progress");
+      if (updateError) throw new Error(updateError.message);
+      rescued += 1;
+    }
+  }
+
+  return rescued;
+}
+
+let reconcileRunning = false;
+async function reconcilePipeline() {
+  if (reconcileRunning) return;
+  reconcileRunning = true;
+  try {
+    const { data: releases, error } = await supabase
+      .from("releases")
+      .select("release_id, updated_at")
+      .eq("status", "in_transcode")
+      .order("updated_at", { ascending: true })
+      .limit(RECONCILE_RELEASE_LIMIT);
+    if (error) throw new Error(error.message);
+    if (!Array.isArray(releases) || releases.length === 0) return;
+
+    let publishedCount = 0;
+    let rescuedJobs = 0;
+    for (const release of releases) {
+      try {
+        const published = await tryAutoPublishRelease(release.release_id);
+        if (published) {
+          publishedCount += 1;
+          continue;
+        }
+        rescuedJobs += await rescueFailedJobsForRelease(release.release_id);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(`[reconciler] release=${release.release_id} error`, message);
+      }
+    }
+
+    if (publishedCount > 0 || rescuedJobs > 0) {
+      console.log(`[reconciler] published=${publishedCount} rescued_jobs=${rescuedJobs} scanned_releases=${releases.length}`);
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("[reconciler] failure", message);
+  } finally {
+    reconcileRunning = false;
+  }
 }
 
 async function failJob(job, message) {
@@ -280,6 +475,16 @@ async function processJob(job) {
       attempts: Number(job.attempts || 0) + 1
     });
 
+    try {
+      const autoPublished = await tryAutoPublishRelease(jobRow.release_id);
+      if (autoPublished) {
+        console.log(`[worker] auto-published release=${jobRow.release_id}`);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[worker] auto-publish skipped release=${jobRow.release_id}: ${message}`);
+    }
+
     console.log(`[worker] completed job=${job.job_id} track=${track.track_id}`);
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
@@ -333,8 +538,13 @@ async function loopWithFailureHandling(slot) {
 
 const ENVIRONMENT = process.env.NODE_ENV || "development";
 console.log(
-  `[worker] boot worker_id=${WORKER_ID} env=${ENVIRONMENT} concurrency=${CONCURRENCY} poll_ms=${POLL_MS} masters_bucket=${MASTERS_BUCKET} streams_bucket=${STREAMS_BUCKET}`
+  `[worker] boot worker_id=${WORKER_ID} env=${ENVIRONMENT} concurrency=${CONCURRENCY} poll_ms=${POLL_MS} reconcile_ms=${RECONCILE_MS} masters_bucket=${MASTERS_BUCKET} streams_bucket=${STREAMS_BUCKET}`
 );
 for (let i = 0; i < CONCURRENCY; i += 1) {
   loopWithFailureHandling(i + 1);
 }
+
+setInterval(() => {
+  reconcilePipeline().catch(() => {});
+}, RECONCILE_MS);
+reconcilePipeline().catch(() => {});

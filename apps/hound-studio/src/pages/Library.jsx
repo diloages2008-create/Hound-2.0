@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { catalogAlbums } from "../data/studioData.js";
-import { API_BASE, getToken, listStudioReleases, deleteStudioRelease } from "../lib/apiClient.js";
+import { hasSession, listStudioReleases, deleteStudioRelease } from "../lib/apiClient.js";
 
 function isUuid(value) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ""));
@@ -20,14 +20,13 @@ function toCard(release) {
 }
 
 export default function Library() {
-  const apiMode = import.meta.env.VITE_HOUND_API_MODE || "live";
   const [albums, setAlbums] = useState(catalogAlbums);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [menuId, setMenuId] = useState("");
 
   const loadCatalog = async () => {
-    if (!getToken()) return;
+    if (!hasSession()) return;
     setBusy(true);
     setError("");
     try {
@@ -47,7 +46,7 @@ export default function Library() {
 
   const handleDeleteRelease = async (releaseId) => {
     if (!releaseId) return;
-    if (!getToken()) {
+    if (!hasSession()) {
       setError("Login first. Only real API releases can be deleted.");
       return;
     }
@@ -75,15 +74,15 @@ export default function Library() {
       <header className="page-header">
         <p className="eyebrow">Catalog Integrity</p>
         <h1>Album Library</h1>
-        <p>Mode: <code>{apiMode}</code> | Backend: <code>{API_BASE}</code></p>
+        <p>Manage live and draft releases without backend noise.</p>
       </header>
 
       <div className="album-actions">
-        <button type="button" className="secondary-button" onClick={loadCatalog} disabled={busy || !getToken()}>
-          {busy ? "Loading..." : "Refresh from API"}
+        <button type="button" className="secondary-button" onClick={loadCatalog} disabled={busy || !hasSession()}>
+          {busy ? "Refreshing..." : "Refresh Catalog"}
         </button>
       </div>
-      {!getToken() ? <p>Login in Profile first. Showing local sample catalog.</p> : null}
+      {!hasSession() ? <p>Login in Profile first. Showing local sample catalog.</p> : null}
       {error ? <p style={{ color: "#a40000" }}>{error}</p> : null}
 
       <section className="panel-grid">
@@ -144,7 +143,7 @@ export default function Library() {
                       className="secondary-button"
                       style={{ width: "100%", textAlign: "left", borderRadius: 0, color: "#a40000" }}
                       onClick={() => handleDeleteRelease(album.id)}
-                      disabled={busy || !getToken() || !isUuid(album.id)}
+                      disabled={busy || !hasSession() || !isUuid(album.id)}
                     >
                       Delete Release
                     </button>

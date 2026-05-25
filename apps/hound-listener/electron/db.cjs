@@ -2,8 +2,8 @@ const fs = require("node:fs");
 const path = require("node:path");
 const Database = require("better-sqlite3");
 
-const FEATURES_VERSION = "v1";
-const EMBEDDING_VERSION = "v1-mfcc-59";
+const FEATURES_VERSION = "v2-rhythm-startcue";
+const EMBEDDING_VERSION = "v2-mfcc-rhythm-63";
 
 const ensureDir = (dirPath) => {
   if (!fs.existsSync(dirPath)) {
@@ -65,6 +65,8 @@ const openDatabase = (app) => {
       key TEXT,
       mode TEXT,
       keyConfidence REAL,
+      rhythmStats TEXT,
+      startCueSec REAL,
       timbreStats TEXT,
       energyCurveSummary TEXT,
       embedding BLOB,
@@ -151,6 +153,8 @@ const openDatabase = (app) => {
   ensureColumn("track_features", "analysisStatus", "TEXT");
   ensureColumn("track_features", "analysisStage", "TEXT");
   ensureColumn("track_features", "analysisProgress", "TEXT");
+  ensureColumn("track_features", "rhythmStats", "TEXT");
+  ensureColumn("track_features", "startCueSec", "REAL");
 
   const seed = db.prepare("SELECT id FROM metrics_summary WHERE id = 1").get();
   if (!seed) {

@@ -1,14 +1,9 @@
 import React, { useState } from "react";
 import { artistProfile } from "../data/studioData.js";
 import {
-  API_BASE,
-  API_MODE,
-  getToken,
-  getAuthMe,
+  hasSession,
   loginArtist,
   logout,
-  setToken,
-  signupArtist,
   getStudioProfile,
   updateStudioProfile
 } from "../lib/apiClient.js";
@@ -21,12 +16,8 @@ function splitList(value) {
 }
 
 export default function Profile() {
-  const apiMode = API_MODE;
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [rightsStatement, setRightsStatement] = useState(
-    "I confirm I own the masters, or have explicit rights to distribute this material on Hound."
-  );
   const [profile, setProfile] = useState({
     stageName: artistProfile.stageName,
     bio: artistProfile.bio,
@@ -39,26 +30,6 @@ export default function Profile() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
-
-  const handleSignup = async () => {
-    setBusy(true);
-    setError("");
-    setMessage("");
-    try {
-      const result = await signupArtist({
-        email,
-        password,
-        stageName: profile.stageName,
-        ownsMasters: true,
-        rightsStatement
-      });
-      setMessage(`Artist created: ${result.artistId}. Login to get access token.`);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setBusy(false);
-    }
-  };
 
   const handleLogin = async () => {
     setBusy(true);
@@ -97,20 +68,6 @@ export default function Profile() {
     }
   };
 
-  const handleWhoAmI = async () => {
-    setBusy(true);
-    setError("");
-    setMessage("");
-    try {
-      const me = await getAuthMe();
-      setMessage(`Session user: ${me.userId} (${me.role || "unknown"})`);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const handleSaveProfile = async () => {
     setBusy(true);
     setError("");
@@ -140,7 +97,7 @@ export default function Profile() {
       <header className="page-header">
         <p className="eyebrow">Step 1</p>
         <h1>Artist Profile</h1>
-        <p>Mode: <code>{apiMode}</code> | Backend: <code>{API_BASE}</code></p>
+        <p>Set your public identity and keep your profile current.</p>
       </header>
 
       <section className="panel-grid panel-grid-double">
@@ -155,29 +112,17 @@ export default function Profile() {
               Password
               <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} />
             </label>
-            <label className="wide">
-              Rights Attestation
-              <textarea value={rightsStatement} onChange={(event) => setRightsStatement(event.target.value)} />
-            </label>
           </div>
+          <p>Closed beta: signups are invite-only and handled by operator.</p>
           <div className="album-actions">
-            <button type="button" className="secondary-button" onClick={handleSignup} disabled={busy}>
-              Sign Up Artist
-            </button>
             <button type="button" className="primary-button" onClick={handleLogin} disabled={busy}>
               Login
             </button>
-            <button type="button" className="secondary-button" onClick={handleLoadProfile} disabled={busy || !getToken()}>
+            <button type="button" className="secondary-button" onClick={handleLoadProfile} disabled={busy || !hasSession()}>
               Load Profile
-            </button>
-            <button type="button" className="secondary-button" onClick={handleWhoAmI} disabled={busy || !getToken()}>
-              Who Am I
             </button>
             <button type="button" className="secondary-button" onClick={() => logout()}>
               Logout
-            </button>
-            <button type="button" className="secondary-button" onClick={() => setToken("")}>
-              Clear Token
             </button>
           </div>
           {message ? <p>{message}</p> : null}
@@ -243,7 +188,7 @@ export default function Profile() {
               />
             </label>
           </div>
-          <button type="button" className="primary-button" onClick={handleSaveProfile} disabled={busy || !getToken()}>
+          <button type="button" className="primary-button" onClick={handleSaveProfile} disabled={busy || !hasSession()}>
             Save Profile
           </button>
         </article>

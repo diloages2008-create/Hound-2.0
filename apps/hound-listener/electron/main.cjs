@@ -129,6 +129,8 @@ const ensureAnalysisWorker = () => {
                key = ?,
                mode = ?,
                keyConfidence = ?,
+               rhythmStats = ?,
+               startCueSec = ?,
                timbreStats = ?,
                energyCurveSummary = ?,
                embedding = ?,
@@ -149,6 +151,8 @@ const ensureAnalysisWorker = () => {
           result.key ?? null,
           result.mode ?? null,
           result.keyConfidence ?? null,
+          JSON.stringify(result.rhythmStats ?? null),
+          result.startCueSec ?? null,
           JSON.stringify(result.timbreStats ?? null),
           JSON.stringify(result.energyCurveSummary ?? null),
           embeddingBuffer,
@@ -764,7 +768,7 @@ const registerIpc = () => {
     if (!dbState || !trackId) return null;
     const row = dbState.db
       .prepare(
-        "SELECT trackId, durationSec, loudnessLUFS, bpm, bpmConfidence, key, mode, keyConfidence, timbreStats, energyCurveSummary, embeddingVersion, featuresVersion, analysisStatus FROM track_features WHERE trackId = ?"
+        "SELECT trackId, durationSec, loudnessLUFS, bpm, bpmConfidence, key, mode, keyConfidence, rhythmStats, startCueSec, timbreStats, energyCurveSummary, embeddingVersion, featuresVersion, analysisStatus FROM track_features WHERE trackId = ?"
       )
       .get(trackId);
     if (!row) return null;
@@ -777,6 +781,8 @@ const registerIpc = () => {
       key: row.key,
       mode: row.mode,
       keyConfidence: row.keyConfidence,
+      rhythmStats: row.rhythmStats ? JSON.parse(row.rhythmStats) : null,
+      startCueSec: row.startCueSec,
       timbreStats: row.timbreStats ? JSON.parse(row.timbreStats) : null,
       energyCurveSummary: row.energyCurveSummary ? JSON.parse(row.energyCurveSummary) : null,
       embeddingVersion: row.embeddingVersion,
