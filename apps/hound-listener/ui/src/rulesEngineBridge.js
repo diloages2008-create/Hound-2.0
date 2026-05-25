@@ -1,3 +1,5 @@
+import { pickNextTrack } from "@hound/rules-engine";
+
 export const LISTENER_GLOBAL_FAVORITES_ORBIT = "listener_orbit_1";
 
 const WORLD_ORBITS = {
@@ -211,34 +213,20 @@ export function evaluateSessionSummary({ tracks = [], events = [] }) {
   return { tracks: nextTracks, updates, worldSuggestions };
 }
 
-const ORBIT_PRIORITY = {
-  orbit_1: 0,
-  orbit_2: 1,
-  orbit_3: 2
-};
-
-function getOrbitPriority(track) {
-  if (track?.globalOrbit === LISTENER_GLOBAL_FAVORITES_ORBIT) return -1;
-  return ORBIT_PRIORITY[track?.worldOrbit] ?? 3;
-}
-
 export function selectNextRecommendedTrack({ tracks = [], currentTrackId = null, timeline = [] }) {
-  const pool = (tracks || []).filter((track) => track && !track.archivedAt && track.id && track.id !== currentTrackId);
+  const pool = (tracks || []).filter((track) => track && !track.archivedAt && track.id);
   if (!pool.length) return null;
 
-  const recentIds = new Set((timeline || []).slice(-8));
+  const recentIds = new Set((timeline || []).slice(-8).filter((id) => id && id !== currentTrackId));
   const notRecent = pool.filter((track) => !recentIds.has(track.id));
-  const candidates = notRecent.length ? notRecent : pool;
+  const candidates = (notRecent.length ? notRecent : pool).filter((track) => track.id !== currentTrackId);
+  if (!candidates.length) return null;
 
-  const sorted = [...candidates].sort((a, b) => {
-    const orbitDelta = getOrbitPriority(a) - getOrbitPriority(b);
-    if (orbitDelta !== 0) return orbitDelta;
-
-    const scoreDelta = Number(b.rotationScore || 0) - Number(a.rotationScore || 0);
-    if (scoreDelta !== 0) return scoreDelta;
-
-    return String(a.id).localeCompare(String(b.id));
+  const { track } = pickNextTrack({
+    tracks: candidates,
+    queue: [],
+    currentTrackId
   });
 
-  return sorted[0] || null;
+  return track || null;
 }
