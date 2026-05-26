@@ -1,7 +1,12 @@
 ﻿import React, { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { createLibraryProvider, PROVIDER_MODE } from "./libraryProvider.js";
 import { selectNextRecommendedTrack } from "./rulesEngineBridge.js";
-import { createSessionId, evaluateListenerSession } from "./listenerTelemetryEngine.js";
+import {
+  createSessionId,
+  evaluateListenerSession,
+  buildRawSongEvent,
+  rawSongEventsToLearningSignals
+} from "./listenerTelemetryEngine.js";
 
 const NAV = [
   { key: "now", label: "Now Playing" },
@@ -92,7 +97,8 @@ export default function App() {
   const providerRef = useRef(createLibraryProvider());
   const audioRef = useRef(null);
   const sessionIdRef = useRef(createSessionId());
-  const learningEventsRef = useRef([]);
+  const rawSongEventsRef = useRef([]);
+  const processedRawEventsCountRef = useRef(0);
   const tracksRef = useRef([]);
 
   const [tracks, setTracks] = useState([]);
@@ -221,29 +227,29 @@ export default function App() {
   };
 
   const applyLocalLearning = () => {
-    if (!learningEventsRef.current.length) return;
+    if (!rawSongEventsRef.current.length) return;
+    if (processedRawEventsCountRef.current >= rawSongEventsRef.current.length) return;
     const currentTracks = tracksRef.current || [];
     if (!currentTracks.length) return;
+    const newRawEvents = rawSongEventsRef.current.slice(processedRawEventsCountRef.current);
+    const learningSignals = rawSongEventsToLearningSignals(newRawEvents);
+    processedRawEventsCountRef.current = rawSongEventsRef.current.length;
+    if (!learningSignals.length) return;
     const result = evaluateListenerSession({
       tracks: currentTracks,
-      events: learningEventsRef.current
+      events: learningSignals
     });
     setTracks(result.tracks.map(normalizeTrack));
   };
 
-  const recordLearningEvent = ({ track, payload = {} }) => {
+  const recordRawSongEvent = ({ eventName, track, payload = {} }) => {
     if (!track?.id) return;
-    learningEventsRef.current.push({
-      trackId: track.id,
-      world: track.world || "Normal",
+    rawSongEventsRef.current.push(buildRawSongEvent({
+      eventName,
+      track,
       sessionId: sessionIdRef.current,
-      timestamp: new Date().toISOString(),
-      percentListened: Number(payload.percentListened || 0),
-      skippedEarly: Boolean(payload.skippedEarly),
-      manualSkip: Boolean(payload.manualSkip),
-      completedPlay: Boolean(payload.completedPlay),
-      replayedSameSession: Number(payload.replayedSameSession || 0)
-    });
+      payload
+    }));
     applyLocalLearning();
   };
 
@@ -284,6 +290,11 @@ export default function App() {
     setIsPlaying(true);
     setStatus(`Playing: ${track.title}`);
     emitLearningSignal("play", { trackId: track.id, source: pendingPlaySource });
+    recordRawSongEvent({
+      eventName: "track_started",
+      track,
+      payload: { source: pendingPlaySource, percent_listened: 0 }
+    });
     setPendingPlaySource("backend");
   };
 
@@ -328,16 +339,22 @@ export default function App() {
     const audio = audioRef.current;
     const position = Number(audio?.currentTime || 0);
     const percentListened = calcPercentListened(currentTrack, position);
-    recordLearningEvent({
+    recordRawSongEvent({
+      eventName: "track_skipped",
       track: currentTrack,
       payload: {
-        percentListened,
-        skippedEarly: percentListened <= 25,
-        manualSkip: true
+        percent_listened: percentListened,
+        skipped_early: percentListened <= 25,
+        manual_skip: true
       }
     });
     const rec = chooseRecommendation();
     if (!rec) return;
+    recordRawSongEvent({
+      eventName: "next_track_selected",
+      track: rec,
+      payload: { reason: "manual_next_end_of_timeline", source: "rules_engine" }
+    });
     setPendingPlaySource("backend");
     setAutoPlayOnSelect(true);
     dispatchTransport({ type: "APPEND_RECOMMENDED_TRACK", trackId: rec.id });
@@ -348,11 +365,12 @@ export default function App() {
     // TRANSPORT FREEZE:
     // Natural end emits song_finished, never skip.
     emitLearningSignal("song_finished", { trackId: currentTrack.id });
-    recordLearningEvent({
+    recordRawSongEvent({
+      eventName: "track_finished",
       track: currentTrack,
       payload: {
-        percentListened: 100,
-        completedPlay: true
+        percent_listened: 100,
+        completed_play: true
       }
     });
     // If forward history exists, consume it first; no recommendation call.
@@ -366,6 +384,11 @@ export default function App() {
       setIsPlaying(false);
       return;
     }
+    recordRawSongEvent({
+      eventName: "next_track_selected",
+      track: rec,
+      payload: { reason: "auto_advance_end_of_timeline", source: "rules_engine" }
+    });
     setPendingPlaySource("backend");
     setAutoPlayOnSelect(true);
     dispatchTransport({ type: "APPEND_RECOMMENDED_TRACK", trackId: rec.id });
@@ -380,11 +403,12 @@ export default function App() {
       audio.currentTime = 0;
       if (!isPlaying) setCurrentTime(0);
       emitLearningSignal("previous_restart_current", { trackId: currentTrack.id });
-      recordLearningEvent({
+      recordRawSongEvent({
+        eventName: "track_replayed",
         track: replayedTrack,
         payload: {
-          percentListened: calcPercentListened(replayedTrack, replayPosition),
-          replayedSameSession: 1
+          percent_listened: calcPercentListened(replayedTrack, replayPosition),
+          replayed_same_session: 1
         }
       });
       return;
@@ -442,12 +466,28 @@ export default function App() {
     const nextSaved = !existing?.saved;
     setTracks((prev) => prev.map((t) => (t.id === trackId ? { ...t, saved: nextSaved } : t)));
     emitLearningSignal(nextSaved ? "favorite" : "unfavorite", { trackId });
+    const track = tracksRef.current.find((t) => t.id === trackId);
+    if (track) {
+      recordRawSongEvent({
+        eventName: "favorite_toggled",
+        track,
+        payload: { is_favorite: nextSaved }
+      });
+    }
   };
 
   const restoreArchived = (trackId) => {
     setTracks((prev) => prev.map((t) => (t.id === trackId ? { ...t, archivedAt: null } : t)));
     setToast("Restored to rotation");
     emitLearningSignal("restore", { trackId });
+    const track = tracksRef.current.find((t) => t.id === trackId);
+    if (track) {
+      recordRawSongEvent({
+        eventName: "archive_restored",
+        track,
+        payload: { restored: true }
+      });
+    }
   };
 
   const renderSongRows = (list, source = "library") => (
