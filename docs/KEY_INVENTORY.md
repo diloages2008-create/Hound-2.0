@@ -21,6 +21,10 @@ Rules:
 | `STORAGE_BUCKET_MASTERS` | config | Worker + Edge Function | Render env, Supabase Edge Function Secrets | n/a |
 | `STORAGE_BUCKET_COVERS` | config | Edge Function | Supabase Edge Function Secrets | n/a |
 | `STORAGE_BUCKET_STREAMS` | config | Worker + Edge Function | Render env, Supabase Edge Function Secrets | n/a |
+| `BETA_INVITE_ONLY` | config | Edge Function (`api-v1`) signup gate | Supabase Edge Function Secrets | frontend envs |
+| `BETA_MAX_SIGNUPS` | config | Edge Function (`api-v1`) signup gate | Supabase Edge Function Secrets | frontend envs |
+| `BETA_ALLOWLIST_EMAILS` | sensitive config | Edge Function (`api-v1`) signup gate | Supabase Edge Function Secrets | frontend envs, git with real emails |
+| `VITE_HOUND_GATE_DISABLED` | public config | Listener web gate | Listener frontend env (`.env`, host config) | secrets stores only |
 
 ## Current Production Targets
 

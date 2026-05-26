@@ -110,6 +110,40 @@ p {
   padding: 26px;
 }
 
+.studio-main-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+.studio-report-message {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.den-nav {
+  background: linear-gradient(180deg, #eceff3 0%, #dde3ea 100%);
+}
+
+.den-nav .brand-mark small {
+  color: #203447;
+}
+
+.den-shell .nav-link {
+  background: rgba(255, 255, 255, 0.75);
+}
+
+.den-shell .nav-link-active {
+  border-color: #9cb0c4;
+  box-shadow: 0 8px 16px rgba(25, 41, 56, 0.14);
+}
+
+.den-list {
+  margin-top: 12px;
+}
+
 .page-wrap {
   display: flex;
   flex-direction: column;
@@ -384,6 +418,10 @@ textarea {
 
   .studio-main {
     padding: 18px;
+  }
+
+  .studio-main-actions {
+    margin-bottom: 12px;
   }
 }
 

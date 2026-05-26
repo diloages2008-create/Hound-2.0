@@ -1,14 +1,13 @@
 import React, { useState } from "react";
 import {
-  API_BASE,
-  API_MODE,
   createRelease,
   createMasterUploadIntent,
   createCoverUploadIntent,
   completeUpload,
   submitRelease,
+  getReleaseReadiness,
   publishRelease,
-  getToken
+  hasSession
 } from "../lib/apiClient.js";
 
 const genreOptions = ["Alt Soul", "Indie Rock", "Electronic", "Jazz", "R&B"];
@@ -27,7 +26,8 @@ export default function Upload() {
     masterAssetId: "",
     coverAssetId: "",
     submitted: false,
-    published: false
+    published: false,
+    processingState: "idle"
   });
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -141,6 +141,7 @@ export default function Upload() {
   const handleSubmitAndPreparePublish = () =>
     run(async () => {
       validateRequired();
+      setPipeline((prev) => ({ ...prev, processingState: "uploading" }));
       const releaseId = await ensureRelease();
       const [masterAssetId, coverAssetId] = await Promise.all([
         uploadFileWithIntent(releaseId, "master"),
@@ -163,8 +164,16 @@ export default function Upload() {
           }
         ]
       });
-      setPipeline((prev) => ({ ...prev, releaseId, masterAssetId, coverAssetId, submitted: true, published: false }));
-      return `Release submitted: ${result.releaseId} (${result.status}). Publish is now enabled.`;
+      setPipeline((prev) => ({
+        ...prev,
+        releaseId,
+        masterAssetId,
+        coverAssetId,
+        submitted: true,
+        published: false,
+        processingState: "transcoding"
+      }));
+      return `Release submitted: ${result.releaseId} (${result.status}). Processing has started.`;
     });
 
   const handlePublishRelease = () =>
@@ -172,30 +181,39 @@ export default function Upload() {
       if (!pipeline.releaseId) throw new Error("Release required.");
       const maxAttempts = 45;
       for (let i = 0; i < maxAttempts; i += 1) {
-        try {
-          const result = await publishRelease(pipeline.releaseId);
-          setPipeline((prev) => ({ ...prev, published: true }));
-          return `Release published: ${result.releaseId} (${result.status})`;
-        } catch (err) {
-          const msg = String(err.message || "");
-          const waiting =
-            msg.includes("track not ready for publish") ||
-            msg.includes("transcode jobs are not fully completed") ||
-            msg.includes("release not ready to publish");
-          if (!waiting) throw err;
-          setMessage(`Transcode still running... retrying publish (${i + 1}/${maxAttempts})`);
+        const readiness = await getReleaseReadiness(pipeline.releaseId);
+        if (!readiness.ready) {
+          setPipeline((prev) => ({ ...prev, processingState: "transcoding" }));
+          setMessage(`Transcoding... (${i + 1}/${maxAttempts})`);
           await sleep(8000);
+          continue;
         }
+
+        setPipeline((prev) => ({ ...prev, processingState: "ready_to_publish" }));
+        const result = await publishRelease(pipeline.releaseId);
+        setPipeline((prev) => ({ ...prev, published: true, processingState: "published" }));
+        return `Release published: ${result.releaseId} (${result.status})`;
       }
       throw new Error("Timed out waiting for transcode to finish. Try Publish again in a minute.");
     });
+
+  const processingLabel =
+    pipeline.processingState === "uploading"
+      ? "Uploading"
+      : pipeline.processingState === "transcoding"
+        ? "Transcoding"
+        : pipeline.processingState === "ready_to_publish"
+          ? "Ready to publish"
+          : pipeline.processingState === "published"
+            ? "Published"
+            : "Idle";
 
   return (
     <div className="page-wrap">
       <header className="page-header">
         <p className="eyebrow">Step 2</p>
         <h1>Upload Music</h1>
-        <p>Mode: <code>{API_MODE}</code> | Backend: <code>{API_BASE}</code></p>
+        <p>Submit a release and let Hound process it through publish.</p>
       </header>
 
       <section className="panel-grid panel-grid-double">
@@ -282,23 +300,24 @@ export default function Upload() {
             <li><strong>Release</strong><span>{pipeline.releaseId || "not created"}</span></li>
             <li><strong>Master Asset</strong><span>{pipeline.masterAssetId || "none"}</span></li>
             <li><strong>Cover Asset</strong><span>{pipeline.coverAssetId || "none"}</span></li>
+            <li><strong>Processing</strong><span>{processingLabel}</span></li>
             <li><strong>Submitted</strong><span>{pipeline.submitted ? "yes" : "no"}</span></li>
             <li><strong>Published</strong><span>{pipeline.published ? "yes" : "no"}</span></li>
           </ol>
 
           <div className="album-actions">
             {!pipeline.submitted ? (
-              <button type="button" className="primary-button" onClick={handleSubmitAndPreparePublish} disabled={busy || !getToken()}>
+              <button type="button" className="primary-button" onClick={handleSubmitAndPreparePublish} disabled={busy || !hasSession()}>
                 Submit Release
               </button>
             ) : (
-              <button type="button" className="primary-button" onClick={handlePublishRelease} disabled={busy || !getToken()}>
+              <button type="button" className="primary-button" onClick={handlePublishRelease} disabled={busy || !hasSession()}>
                 Publish Release
               </button>
             )}
           </div>
 
-          {!getToken() ? <p>Login in Profile first to run pipeline.</p> : null}
+          {!hasSession() ? <p>Login in Profile first to run pipeline.</p> : null}
           {message ? <p>{message}</p> : null}
           {error ? <p style={{ color: "#a40000" }}>{error}</p> : null}
         </article>

@@ -3,6 +3,8 @@ const assert = require("node:assert/strict");
 
 const {
   ORBITS,
+  WORLD_ORBITS,
+  HOUND_TERMS,
   ROTATION_OVERRIDE,
   normalizeTrack,
   validatePlayEvent,
@@ -23,6 +25,7 @@ test("normalizeTrack enforces defaults and clamps numeric fields", () => {
   assert.equal(track.playCountTotal, 0);
   assert.deepEqual(track.moodTags, ["Warm"]);
   assert.equal(track.rotationOverride, ROTATION_OVERRIDE.NONE);
+  assert.equal(track.worldOrbit, WORLD_ORBITS.ORBIT_3);
 });
 
 test("normalizeTrack throws without valid id", () => {
@@ -61,4 +64,9 @@ test("orbit constants are stable", () => {
   assert.equal(ORBITS.ROTATION, "rotation");
   assert.equal(ORBITS.RECENT, "recent");
   assert.equal(ORBITS.DISCOVERY, "discovery");
+  assert.equal(WORLD_ORBITS.ORBIT_1, "orbit_1");
+  assert.equal(WORLD_ORBITS.ORBIT_2, "orbit_2");
+  assert.equal(WORLD_ORBITS.ORBIT_3, "orbit_3");
+  assert.equal(HOUND_TERMS.LISTENER, "listener");
+  assert.equal(HOUND_TERMS.WORLD, "world");
 });

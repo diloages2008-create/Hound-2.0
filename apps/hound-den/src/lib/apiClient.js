@@ -217,9 +217,19 @@ export async function listAdminReports(params = {}) {
   if (params.q) search.set("q", params.q);
   if (params.category) search.set("category", params.category);
   if (params.app) search.set("app", params.app);
+  if (params.incidentStatus) search.set("incidentStatus", params.incidentStatus);
+  if (params.severity) search.set("severity", params.severity);
+  if (params.assignee) search.set("assignee", params.assignee);
   if (params.limit) search.set("limit", String(params.limit));
   const query = search.toString();
   return request(`/v1/admin/reports${query ? `?${query}` : ""}`, { method: "GET" }, true);
+}
+
+export async function runAdminReportAction(reportId, body) {
+  return request(`/v1/admin/reports/${reportId}/actions`, {
+    method: "POST",
+    body: JSON.stringify(body)
+  }, true);
 }
 
 export async function createModerationFlagFromReport(reportId, body) {

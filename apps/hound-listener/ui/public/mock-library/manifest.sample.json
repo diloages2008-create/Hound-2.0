@@ -1,0 +1,16 @@
+{
+  "tracks": [
+    {
+      "trackId": "local-track-001",
+      "title": "Sample Title",
+      "artist": "Sample Artist",
+      "album": "Sample Album",
+      "durationSec": 212,
+      "streamUrl": "http://localhost:5173/mock-library/audio/sample-001.mp3",
+      "artworkPath": "/mock-library/artwork/sample-001.jpg",
+      "world": "Night Drive",
+      "orbit": "discovery",
+      "worldOrbit": "orbit_3"
+    }
+  ]
+}

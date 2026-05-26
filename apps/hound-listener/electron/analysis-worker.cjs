@@ -277,6 +277,81 @@ const computeEnergyCurveSummary = (samples) => {
   return summary;
 };
 
+const computeRhythmStats = (samples) => {
+  const frameEnergy = [];
+  const onsetCurve = [];
+  let prevEnergy = 0;
+  for (const frame of frameIterator(samples, FRAME_SIZE, HOP_SIZE)) {
+    let low = 0;
+    let high = 0;
+    let sum = 0;
+    for (let i = 0; i < frame.length; i += 1) {
+      const value = frame[i];
+      const abs = Math.abs(value);
+      sum += abs;
+      if (i < frame.length / 4) {
+        low += abs;
+      } else {
+        high += abs;
+      }
+    }
+    const energy = sum / frame.length;
+    frameEnergy.push(energy);
+    onsetCurve.push(Math.max(0, energy - prevEnergy));
+    prevEnergy = energy;
+  }
+
+  if (frameEnergy.length < 2) {
+    return {
+      percussionRatio: 0,
+      rhythmStrength: 0,
+      onsetDensity: 0,
+      startCueSec: 0
+    };
+  }
+
+  let lowEnergyTotal = 0;
+  let highEnergyTotal = 0;
+  for (const frame of frameIterator(samples, FRAME_SIZE, HOP_SIZE)) {
+    let low = 0;
+    let high = 0;
+    for (let i = 0; i < frame.length; i += 1) {
+      const abs = Math.abs(frame[i]);
+      if (i < frame.length / 4) low += abs;
+      else high += abs;
+    }
+    lowEnergyTotal += low;
+    highEnergyTotal += high;
+  }
+
+  const meanOnset = onsetCurve.reduce((acc, v) => acc + v, 0) / onsetCurve.length;
+  const maxOnset = Math.max(...onsetCurve, 1e-9);
+  let onsetCount = 0;
+  let startFrame = 0;
+  const startThreshold = maxOnset * 0.12;
+  for (let i = 0; i < onsetCurve.length; i += 1) {
+    if (onsetCurve[i] > meanOnset * 1.6) onsetCount += 1;
+    if (startFrame === 0 && onsetCurve[i] >= startThreshold) {
+      startFrame = i;
+    }
+  }
+
+  const percussionRatio = (lowEnergyTotal + highEnergyTotal) > 0
+    ? Math.max(0, Math.min(1, highEnergyTotal / (lowEnergyTotal + highEnergyTotal)))
+    : 0;
+  const rhythmStrength = Math.max(0, Math.min(1, meanOnset / maxOnset));
+  const seconds = samples.length / SAMPLE_RATE;
+  const onsetDensity = seconds > 0 ? onsetCount / seconds : 0;
+  const startCueSec = (startFrame * HOP_SIZE) / SAMPLE_RATE;
+
+  return {
+    percussionRatio,
+    rhythmStrength,
+    onsetDensity,
+    startCueSec
+  };
+};
+
 const computeBpm = (samples) => {
   const envelope = [];
   for (const frame of frameIterator(samples, FRAME_SIZE, HOP_SIZE)) {
@@ -354,7 +429,7 @@ const computeKey = (samples) => {
   return { key: PITCH_CLASSES[chosen.key], mode, confidence };
 };
 
-const buildEmbedding = ({ mfccMean, mfccVar, spectral, bpm, key, mode, energyCurve }) => {
+const buildEmbedding = ({ mfccMean, mfccVar, spectral, bpm, key, mode, energyCurve, rhythm }) => {
   const keyIndex = PITCH_CLASSES.indexOf(key);
   const keyOneHot = new Array(12).fill(0);
   if (keyIndex >= 0) keyOneHot[keyIndex] = 1;
@@ -367,6 +442,10 @@ const buildEmbedding = ({ mfccMean, mfccVar, spectral, bpm, key, mode, energyCur
     spectral.rolloff / (SAMPLE_RATE / 2),
     spectral.flatness,
     bpmNorm,
+    rhythm?.percussionRatio ?? 0,
+    rhythm?.rhythmStrength ?? 0,
+    Math.min(1, (rhythm?.onsetDensity ?? 0) / 8),
+    Math.min(1, (rhythm?.startCueSec ?? 0) / 15),
     ...keyOneHot,
     modeFlag,
     ...energyCurve
@@ -382,6 +461,7 @@ const analyzeTrack = async ({ trackId, filePath, loudnessLUFS }) => {
   const mfccStats = computeMFCCStats(samples);
   const spectral = computeSpectralStats(samples);
   const energyCurve = computeEnergyCurveSummary(samples);
+  const rhythmStats = computeRhythmStats(samples);
   const bpmResult = computeBpm(samples);
   const keyResult = computeKey(samples);
   parentPort.postMessage({ type: "progress", trackId, stage: "embedding", progress: 0.8 });
@@ -392,7 +472,8 @@ const analyzeTrack = async ({ trackId, filePath, loudnessLUFS }) => {
     bpm: bpmResult.bpm,
     key: keyResult.key,
     mode: keyResult.mode,
-    energyCurve
+    energyCurve,
+    rhythm: rhythmStats
   });
   parentPort.postMessage({ type: "progress", trackId, stage: "finalize", progress: 1 });
 
@@ -405,6 +486,8 @@ const analyzeTrack = async ({ trackId, filePath, loudnessLUFS }) => {
     key: keyResult.key,
     mode: keyResult.mode,
     keyConfidence: keyResult.confidence,
+    rhythmStats,
+    startCueSec: rhythmStats.startCueSec,
     timbreStats: {
       mfccMean: mfccStats.mean,
       mfccVar: mfccStats.variance,

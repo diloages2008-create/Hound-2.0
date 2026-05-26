@@ -4,6 +4,21 @@ const ORBITS = Object.freeze({
   DISCOVERY: "discovery"
 });
 
+const WORLD_ORBITS = Object.freeze({
+  ORBIT_1: "orbit_1",
+  ORBIT_2: "orbit_2",
+  ORBIT_3: "orbit_3"
+});
+
+const HOUND_TERMS = Object.freeze({
+  LISTENER: "listener",
+  MOOD: "mood",
+  WORLD: "world",
+  FAVORITES: "favorites",
+  ARCHIVE: "archive",
+  NEW_MOOD: "new_mood"
+});
+
 const ROTATION_OVERRIDE = Object.freeze({
   NONE: "none",
   FORCE_ON: "force_on",
@@ -35,6 +50,7 @@ const DEFAULT_TRACK = Object.freeze({
   rotation: false,
   rotationOverride: ROTATION_OVERRIDE.NONE,
   rotationScore: 0,
+  worldOrbit: WORLD_ORBITS.ORBIT_3,
   playCountTotal: 0,
   orbit: null,
   lastPositiveListenAt: null,
@@ -65,6 +81,9 @@ function normalizeTrack(rawTrack = {}) {
   next.rotationOverride = Object.values(ROTATION_OVERRIDE).includes(next.rotationOverride)
     ? next.rotationOverride
     : ROTATION_OVERRIDE.NONE;
+  next.worldOrbit = Object.values(WORLD_ORBITS).includes(next.worldOrbit)
+    ? next.worldOrbit
+    : WORLD_ORBITS.ORBIT_3;
   next.moodTags = Array.isArray(next.moodTags)
     ? next.moodTags.filter((tag) => typeof tag === "string" && tag.trim())
     : [];
@@ -86,6 +105,8 @@ function validatePlayEvent(event) {
 
 module.exports = {
   ORBITS,
+  WORLD_ORBITS,
+  HOUND_TERMS,
   ROTATION_OVERRIDE,
   PLAY_EVENT_KEYS,
   DEFAULT_TRACK,

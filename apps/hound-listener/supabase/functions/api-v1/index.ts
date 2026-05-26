@@ -36,6 +36,13 @@ type AuthContext = {
   accountStatus: "active" | "suspended" | null;
 };
 
+const REPORT_INCIDENT_SEVERITIES = new Set([
+  "low",
+  "medium",
+  "high",
+  "critical"
+]);
+
 type AlbumCard = {
   albumId: string;
   title: string;
@@ -297,6 +304,87 @@ async function writeAdminAuditEvent(options: {
   }
 }
 
+async function maybeAutoPublishRelease(releaseId: string, artistId?: string | null) {
+  if (!releaseId) return false;
+
+  let releaseQuery = supabase
+    .from("releases")
+    .select("release_id, artist_id, status")
+    .eq("release_id", releaseId);
+  if (artistId) releaseQuery = releaseQuery.eq("artist_id", artistId);
+  const { data: releaseRow, error: releaseError } = await releaseQuery.maybeSingle();
+  if (releaseError) throw new Error(releaseError.message);
+  if (!releaseRow || releaseRow.status !== "in_transcode") return false;
+
+  const { data: tracks, error: tracksError } = await supabase
+    .from("tracks")
+    .select("track_id, stream_manifest_path, duration_sec, loudness_lufs, master_asset_id")
+    .eq("release_id", releaseId);
+  if (tracksError) throw new Error(tracksError.message);
+  if (!tracks || tracks.length === 0) return false;
+
+  const trackMasterIds = tracks
+    .map((track: any) => track.master_asset_id)
+    .filter((id: string | null) => typeof id === "string" && id.length > 0);
+  if (trackMasterIds.length !== tracks.length) return false;
+
+  const { data: masterAssets, error: masterAssetsError } = await supabase
+    .from("upload_assets")
+    .select("asset_id, status")
+    .in("asset_id", trackMasterIds);
+  if (masterAssetsError) throw new Error(masterAssetsError.message);
+  const statusByAssetId = new Map((masterAssets ?? []).map((asset: any) => [asset.asset_id, asset.status]));
+
+  const allTracksReady = tracks.every((track: any) => {
+    const masterStatus = statusByAssetId.get(track.master_asset_id) ?? null;
+    return (
+      Boolean(track.stream_manifest_path) &&
+      Number.isFinite(track.duration_sec) &&
+      track.duration_sec > 0 &&
+      Number.isFinite(track.loudness_lufs) &&
+      masterStatus === "processed"
+    );
+  });
+  if (!allTracksReady) return false;
+
+  const { data: pendingJobs, error: pendingJobsError } = await supabase
+    .from("transcode_jobs")
+    .select("job_id")
+    .eq("release_id", releaseId)
+    .in("status", ["queued", "in_progress", "failed"]);
+  if (pendingJobsError) throw new Error(pendingJobsError.message);
+  if (pendingJobs && pendingJobs.length > 0) return false;
+
+  let publishPatch: Record<string, unknown> = {
+    status: "live",
+    published_at: nowIso(),
+    approved_at: nowIso(),
+    updated_at: nowIso()
+  };
+
+  let publishQuery = supabase
+    .from("releases")
+    .update(publishPatch)
+    .eq("release_id", releaseId)
+    .eq("status", "in_transcode");
+  if (artistId) publishQuery = publishQuery.eq("artist_id", artistId);
+  let publishRes = await publishQuery.select("release_id").maybeSingle();
+
+  if (publishRes.error && isMissingColumnError(publishRes.error)) {
+    publishPatch = { status: "live", updated_at: nowIso() };
+    let fallbackQuery = supabase
+      .from("releases")
+      .update(publishPatch)
+      .eq("release_id", releaseId)
+      .eq("status", "in_transcode");
+    if (artistId) fallbackQuery = fallbackQuery.eq("artist_id", artistId);
+    publishRes = await fallbackQuery.select("release_id").maybeSingle();
+  }
+
+  if (publishRes.error) throw new Error(publishRes.error.message);
+  return Boolean(publishRes.data?.release_id);
+}
+
 function isIgnorableDeleteError(error: { message?: string; code?: string } | null | undefined) {
   return !error || isMissingTableError(error);
 }
@@ -345,6 +433,29 @@ function sanitizeBrowserInfo(raw: unknown) {
 function sanitizeObject(raw: unknown) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
   return raw;
+}
+
+function sanitizeIncidentSeverity(raw: unknown) {
+  const value = toNonEmptyString(raw).toLowerCase();
+  return REPORT_INCIDENT_SEVERITIES.has(value) ? value : "medium";
+}
+
+function appendReportActionHistory(
+  existingHistoryRaw: unknown,
+  entry: { action: string; byUserId: string; reason?: string; metadata?: Record<string, unknown> }
+) {
+  const existing = Array.isArray(existingHistoryRaw) ? existingHistoryRaw.filter((item) => item && typeof item === "object") : [];
+  const next = [
+    ...existing,
+    {
+      at: nowIso(),
+      action: toNonEmptyString(entry.action).slice(0, 64),
+      byUserId: toNonEmptyString(entry.byUserId).slice(0, 64),
+      reason: toNonEmptyString(entry.reason ?? "").slice(0, 1024) || null,
+      metadata: entry.metadata ?? {}
+    }
+  ];
+  return next.slice(-100);
 }
 
 async function enforceClosedBetaSignup(email: string, role: "artist" | "listener", inviteTokenRaw: unknown) {
@@ -791,6 +902,7 @@ Deno.serve(async (req) => {
       const workerJobId = toNonEmptyString(body.workerJobId ?? body.jobId).slice(0, 64) || null;
       const deviceInfo = sanitizeObject(body.deviceInfo);
       const networkState = sanitizeObject(body.networkState);
+      const incidentSeverity = sanitizeIncidentSeverity(body.severity ?? body.incidentSeverity ?? "medium");
 
       if (!["studio", "listener"].includes(appSurface)) {
         return json({ error: "app must be 'studio' or 'listener'" }, 400);
@@ -831,7 +943,15 @@ Deno.serve(async (req) => {
           release_id: releaseId,
           track_id: trackId,
           artist_id: artistId,
-          playback_session_id: playbackSessionId || null
+          playback_session_id: playbackSessionId || null,
+          incident_status: "new",
+          incident_severity: incidentSeverity,
+          incident_last_action_at: nowIso(),
+          incident_action_history: appendReportActionHistory([], {
+            action: "created",
+            byUserId: optionalAuth?.userId ?? "anonymous",
+            metadata: { appSurface, category: reportCategory || null }
+          })
         })
         .select("report_id")
         .single();
@@ -1963,17 +2083,24 @@ Deno.serve(async (req) => {
       const url = new URL(req.url);
       const category = toNonEmptyString(url.searchParams.get("category") ?? "").toLowerCase();
       const appSurface = toNonEmptyString(url.searchParams.get("app") ?? "").toLowerCase();
+      const incidentStatus = toNonEmptyString(url.searchParams.get("incidentStatus") ?? "").toLowerCase();
+      const severity = toNonEmptyString(url.searchParams.get("severity") ?? "").toLowerCase();
+      const assignee = toNonEmptyString(url.searchParams.get("assignee") ?? "").toLowerCase();
       const q = toNonEmptyString(url.searchParams.get("q") ?? "").toLowerCase();
       const limitRaw = Number(url.searchParams.get("limit") ?? "120");
       const limit = Math.max(1, Math.min(300, Number.isFinite(limitRaw) ? limitRaw : 120));
 
       let queryBuilder = supabase
         .from("client_issue_reports")
-        .select("report_id, user_id, account_type, app_surface, platform, app_version, environment, route, report_category, user_description, error_code, error_message, failed_request_url, response_status, worker_job_id, release_id, track_id, artist_id, playback_session_id, client_timestamp, browser_info, device_info, network_state, client_actions, metadata, created_at")
+        .select("report_id, user_id, account_type, app_surface, platform, app_version, environment, route, report_category, user_description, error_code, error_message, stack_trace, failed_request_url, response_status, worker_job_id, release_id, track_id, artist_id, playback_session_id, client_timestamp, browser_info, device_info, network_state, client_actions, metadata, incident_status, incident_severity, incident_assignee_user_id, incident_reason, incident_resolution_notes, incident_resolved_at, incident_last_action_at, incident_action_history, created_at")
         .order("created_at", { ascending: false })
         .limit(limit);
       if (category) queryBuilder = queryBuilder.eq("report_category", category);
       if (appSurface) queryBuilder = queryBuilder.eq("app_surface", appSurface);
+      if (incidentStatus && incidentStatus !== "all") queryBuilder = queryBuilder.eq("incident_status", incidentStatus);
+      if (severity && severity !== "all") queryBuilder = queryBuilder.eq("incident_severity", severity);
+      if (assignee === "me") queryBuilder = queryBuilder.eq("incident_assignee_user_id", admin.context.userId);
+      if (assignee === "unassigned") queryBuilder = queryBuilder.is("incident_assignee_user_id", null);
 
       const { data: reports, error } = await queryBuilder;
       if (error) return json({ error: error.message }, 400);
@@ -1984,10 +2111,99 @@ Deno.serve(async (req) => {
           String(report.report_id ?? "").toLowerCase().includes(q) ||
           String(report.user_description ?? "").toLowerCase().includes(q) ||
           String(report.error_message ?? "").toLowerCase().includes(q) ||
+          String(report.error_code ?? "").toLowerCase().includes(q) ||
+          String(report.worker_job_id ?? "").toLowerCase().includes(q) ||
+          String(report.release_id ?? "").toLowerCase().includes(q) ||
+          String(report.track_id ?? "").toLowerCase().includes(q) ||
+          String(report.artist_id ?? "").toLowerCase().includes(q) ||
           String(report.route ?? "").toLowerCase().includes(q)
         );
       });
       return json({ reports: filtered });
+    }
+
+    const reportActionRoute = getPathParam(routePath, /^\/v1\/admin\/reports\/([0-9a-f-]+)\/actions$/i);
+    if (req.method === "POST" && reportActionRoute) {
+      const admin = await ensureAdmin(req, ["super_admin", "ops_admin", "content_admin"]);
+      if (admin.error || !admin.context) return admin.error;
+
+      const body = await parseJson(req);
+      const action = toNonEmptyString(body.action).toLowerCase();
+      const reason = toNonEmptyString(body.reason).slice(0, 1024);
+      const requestedSeverity = toNonEmptyString(body.severity).toLowerCase();
+
+      if (!reason) return json({ error: "reason is required" }, 400);
+
+      const { data: report, error: reportError } = await supabase
+        .from("client_issue_reports")
+        .select("report_id, incident_status, incident_severity, incident_assignee_user_id, incident_action_history")
+        .eq("report_id", reportActionRoute)
+        .maybeSingle();
+      if (reportError) return json({ error: reportError.message }, 400);
+      if (!report) return json({ error: "report not found" }, 404);
+
+      const patch: Record<string, unknown> = {
+        incident_last_action_at: nowIso(),
+        incident_reason: reason
+      };
+      const metadata: Record<string, unknown> = {};
+
+      if (action === "triage") {
+        patch.incident_status = "triaged";
+      } else if (action === "investigate") {
+        patch.incident_status = "investigating";
+      } else if (action === "escalate") {
+        patch.incident_status = "escalated";
+      } else if (action === "resolve") {
+        patch.incident_status = "resolved";
+        patch.incident_resolution_notes = toNonEmptyString(body.resolutionNotes || reason).slice(0, 4000);
+        patch.incident_resolved_at = nowIso();
+      } else if (action === "dismiss") {
+        patch.incident_status = "dismissed";
+        patch.incident_resolution_notes = toNonEmptyString(body.resolutionNotes || reason).slice(0, 4000);
+        patch.incident_resolved_at = nowIso();
+      } else if (action === "reopen") {
+        patch.incident_status = "triaged";
+        patch.incident_resolved_at = null;
+        patch.incident_resolution_notes = null;
+      } else if (action === "assign_to_me") {
+        patch.incident_assignee_user_id = admin.context.userId;
+      } else {
+        return json({ error: `unsupported report action: ${action}` }, 400);
+      }
+
+      if (requestedSeverity) {
+        const severity = sanitizeIncidentSeverity(requestedSeverity);
+        patch.incident_severity = severity;
+        metadata.severity = severity;
+      }
+
+      patch.incident_action_history = appendReportActionHistory(report.incident_action_history, {
+        action,
+        byUserId: admin.context.userId,
+        reason,
+        metadata
+      });
+
+      const { data: updated, error: updateError } = await supabase
+        .from("client_issue_reports")
+        .update(patch)
+        .eq("report_id", reportActionRoute)
+        .select("report_id, incident_status, incident_severity, incident_assignee_user_id, incident_reason, incident_resolution_notes, incident_resolved_at, incident_last_action_at, incident_action_history")
+        .single();
+      if (updateError || !updated) return json({ error: updateError?.message ?? "failed to update report incident status" }, 400);
+
+      await writeAdminAuditEvent({
+        actorUserId: admin.context.userId,
+        actorAdminScope: admin.context.adminScope,
+        action: `report_${action}`,
+        entityType: "report",
+        entityId: reportActionRoute,
+        reason,
+        metadata: { severity: updated.incident_severity, status: updated.incident_status }
+      });
+
+      return json({ report: updated });
     }
 
     const reportFlagRoute = getPathParam(routePath, /^\/v1\/admin\/reports\/([0-9a-f-]+)\/flag$/i);
@@ -2001,7 +2217,7 @@ Deno.serve(async (req) => {
 
       const { data: report, error: reportError } = await supabase
         .from("client_issue_reports")
-        .select("report_id, release_id, track_id, artist_id")
+        .select("report_id, release_id, track_id, artist_id, incident_action_history")
         .eq("report_id", reportFlagRoute)
         .maybeSingle();
       if (reportError) return json({ error: reportError.message }, 400);
@@ -2023,6 +2239,23 @@ Deno.serve(async (req) => {
         .select("flag_id, target_type, target_id, status, category, created_at")
         .single();
       if (flagError || !flag) return json({ error: flagError?.message ?? "failed to create moderation flag" }, 400);
+
+      const history = appendReportActionHistory(report.incident_action_history, {
+        action: "create_moderation_flag",
+        byUserId: admin.context.userId,
+        reason,
+        metadata: { flagId: flag.flag_id, category: flag.category }
+      });
+
+      await supabase
+        .from("client_issue_reports")
+        .update({
+          incident_status: "escalated",
+          incident_reason: reason,
+          incident_last_action_at: nowIso(),
+          incident_action_history: history
+        })
+        .eq("report_id", report.report_id);
 
       await writeAdminAuditEvent({
         actorUserId: admin.context.userId,
@@ -2433,8 +2666,28 @@ Deno.serve(async (req) => {
 
       if (error) return json({ error: error.message }, 400);
 
+      const stuckReleaseIds = (data ?? [])
+        .filter((release: any) => release.status === "in_transcode")
+        .map((release: any) => release.release_id);
+      if (stuckReleaseIds.length > 0) {
+        for (const releaseId of stuckReleaseIds) {
+          try {
+            await maybeAutoPublishRelease(releaseId, artist.artist_id);
+          } catch {
+            // best effort; list endpoint must still return
+          }
+        }
+      }
+
+      const { data: refreshed, error: refreshedError } = await supabase
+        .from("releases")
+        .select("release_id, artist_id, title, status, genre, mood_tags, release_type, release_date, created_at")
+        .eq("artist_id", artist.artist_id)
+        .order("created_at", { ascending: false });
+      if (refreshedError) return json({ error: refreshedError.message }, 400);
+
       return json({
-        releases: (data ?? []).map((release: any) => ({
+        releases: (refreshed ?? []).map((release: any) => ({
           releaseId: release.release_id,
           artistId: release.artist_id,
           title: release.title,
@@ -2725,6 +2978,12 @@ Deno.serve(async (req) => {
       const artist = await getArtistProfileByUserId(auth.context.userId);
       if (!artist) return json({ error: "artist profile not found" }, 404);
 
+      try {
+        await maybeAutoPublishRelease(readinessReleaseId, artist.artist_id);
+      } catch {
+        // best effort; readiness still returns diagnostics
+      }
+
       const { data: releaseRow, error: releaseReadError } = await supabase
         .from("releases")
         .select("release_id, status, artist_id")
@@ -2778,7 +3037,8 @@ Deno.serve(async (req) => {
       );
       const hasPendingJobs = Array.isArray(pendingJobs) && pendingJobs.length > 0;
       const releaseTransitionReady = canReleaseTransition(releaseRow.status, "live");
-      const ready = hasTracks && allTracksReady && !hasPendingJobs && releaseTransitionReady;
+      const alreadyLive = releaseRow.status === "live";
+      const ready = alreadyLive || (hasTracks && allTracksReady && !hasPendingJobs && releaseTransitionReady);
 
       return json({
         releaseId: releaseRow.release_id,
@@ -2809,6 +3069,23 @@ Deno.serve(async (req) => {
         .eq("artist_id", artist.artist_id)
         .single();
       if (releaseReadError || !releaseRow) return json({ error: "release not found" }, 404);
+      if (releaseRow.status === "live") {
+        const { data: liveRelease } = await supabase
+          .from("releases")
+          .select("release_id, artist_id, title, status, genre, mood_tags")
+          .eq("release_id", publishReleaseId)
+          .eq("artist_id", artist.artist_id)
+          .single();
+        if (!liveRelease) return json({ error: "release not found" }, 404);
+        return json({
+          releaseId: liveRelease.release_id,
+          artistId: liveRelease.artist_id,
+          title: liveRelease.title,
+          status: liveRelease.status,
+          genre: liveRelease.genre,
+          moodTags: liveRelease.mood_tags ?? []
+        });
+      }
       if (!canReleaseTransition(releaseRow.status, "live")) {
         return json({ error: `illegal release transition: ${releaseRow.status} -> live` }, 400);
       }

@@ -1,0 +1,51 @@
+name: Hound CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main, hound/updates]
+
+jobs:
+  build-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Run tests (if script exists)
+        shell: bash
+        run: |
+          if npm run | grep -qE '^\s+test\s'; then
+            npm test
+          else
+            echo "No root test script; skipping."
+          fi
+
+      - name: Build listener (if script exists)
+        shell: bash
+        run: |
+          if npm run | grep -qE '^\s+listener:build\s'; then
+            npm run listener:build
+          else
+            echo "No listener:build script; skipping."
+          fi
+
+      - name: Build studio (if script exists)
+        shell: bash
+        run: |
+          if npm run | grep -qE '^\s+studio:build\s'; then
+            npm run studio:build
+          else
+            echo "No studio:build script; skipping."
+          fi
+

@@ -1,11 +1,9 @@
 import React, { useState } from "react";
-import { loginArtist, signupArtist } from "../lib/apiClient.js";
+import { loginArtist } from "../lib/apiClient.js";
 
 export default function Auth() {
-  const [mode, setMode] = useState("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [stageName, setStageName] = useState("");
   const [rememberMe, setRememberMe] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -16,19 +14,7 @@ export default function Auth() {
     setError("");
     setMessage("");
     try {
-      if (mode === "login") {
-        await loginArtist({ email, password, rememberMe });
-        window.location.href = "/dashboard";
-        return;
-      }
-      await signupArtist({
-        email,
-        password,
-        stageName,
-        ownsMasters: true,
-        rightsStatement: "I confirm I own or control rights for uploaded material.",
-        rememberMe
-      });
+      await loginArtist({ email, password, rememberMe });
       window.location.href = "/dashboard";
     } catch (err) {
       setError(err.message || "Request failed");
@@ -42,30 +28,12 @@ export default function Auth() {
       <header className="page-header">
         <p className="eyebrow">Welcome</p>
         <h1>Hound Studio</h1>
-        <p>{mode === "login" ? "Log in to continue." : "Create your artist account."}</p>
+        <p>Closed beta mode. Approved users only.</p>
+        <p>Admin access is available in the separate HOUND DEN app.</p>
       </header>
 
       <section className="panel-grid">
         <article className="panel">
-          <div className="album-actions">
-            <button
-              type="button"
-              className={mode === "login" ? "primary-button" : "secondary-button"}
-              onClick={() => setMode("login")}
-              disabled={busy}
-            >
-              Login
-            </button>
-            <button
-              type="button"
-              className={mode === "signup" ? "primary-button" : "secondary-button"}
-              onClick={() => setMode("signup")}
-              disabled={busy}
-            >
-              Sign Up
-            </button>
-          </div>
-
           <div className="form-grid">
             <label>
               Email
@@ -75,12 +43,6 @@ export default function Auth() {
               Password
               <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} />
             </label>
-            {mode === "signup" ? (
-              <label>
-                Stage Name
-                <input type="text" value={stageName} onChange={(event) => setStageName(event.target.value)} />
-              </label>
-            ) : null}
             <label>
               <input
                 type="checkbox"
@@ -94,7 +56,7 @@ export default function Auth() {
 
           <div className="album-actions">
             <button type="button" className="primary-button" onClick={run} disabled={busy}>
-              {busy ? "Please wait..." : mode === "login" ? "Login" : "Create Account"}
+              {busy ? "Please wait..." : "Login"}
             </button>
           </div>
 

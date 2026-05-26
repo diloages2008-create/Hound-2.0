@@ -56,3 +56,12 @@ Desktop packaging is deferred until Web v1 stability is complete.
 - Optional overrides:
   - `HOUND_STUDIO_ENV_DIR` for Studio Vite env directory.
   - `HOUND_LISTENER_ENV_DIR` for Listener UI Vite env directory.
+
+## Closed Beta Controls
+
+- Edge function secrets (`api-v1`):
+  - `BETA_INVITE_ONLY=true`
+  - `BETA_MAX_SIGNUPS=5`
+  - `BETA_ALLOWLIST_EMAILS=trusted1@example.com,trusted2@example.com`
+- Listener UI env:
+  - `VITE_HOUND_GATE_DISABLED=false` (default). Set `true` only for local bypass.

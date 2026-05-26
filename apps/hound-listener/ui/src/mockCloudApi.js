@@ -118,6 +118,14 @@ export async function mockListenerRequest(path, options = {}) {
     return { accepted: true };
   }
 
+  if (method === "POST" && path === "/v1/client/issues") {
+    const reportId = `mock-report-${Math.random().toString(36).slice(2, 10)}`;
+    return {
+      reportId,
+      report_id: reportId
+    };
+  }
+
   const saveMatch = path.match(/^\/v1\/listener\/tracks\/([^/]+)\/save$/);
   if (method === "POST" && saveMatch) {
     return { trackId: saveMatch[1], saved: true };

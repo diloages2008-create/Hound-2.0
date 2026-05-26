@@ -2,14 +2,23 @@ node_modules/
 dist/
 ui/dist/
 *.log
+.DS_Store
 .tmp/
 .tools/
 backups/
 
 .env
+.env.*
+!.env.example
 den.env
 .env.local
 .env.*.local
+.vite/
+.next/
+.cache/
+.turbo/
+coverage/
+build/
 
 # Electron / build outputs
 apps/**/dist/
@@ -39,9 +48,13 @@ apps/**/electron/ffmpeg/
 # Supabase local artifacts
 apps/**/supabase/.temp/
 apps/**/supabase/supabase.exe
+supabase/.temp/
 
 # Local runtime data
 apps/hound-listener/data/
+apps/hound-listener/ui/public/mock-library/audio/
+apps/hound-listener/ui/public/mock-library/artwork/
+apps/hound-listener/ui/public/mock-library/local-manifest*.json
 
 .vercel
 .env*.local

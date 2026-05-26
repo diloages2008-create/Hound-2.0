@@ -1,0 +1,7 @@
+node_modules
+apps/hound-listener/release
+apps/hound-listener/dist
+apps/hound-listener/out
+backups
+.tools
+*.log

@@ -5,6 +5,10 @@ import path from "node:path";
 
 const defaultEnvDir = path.join(os.homedir(), ".hound-secrets", "hound-listener");
 const envDir = process.env.HOUND_LISTENER_ENV_DIR || defaultEnvDir;
+const mockMusicRoot = process.env.HOUND_MOCK_MUSIC_ROOT
+  ? path.resolve(process.env.HOUND_MOCK_MUSIC_ROOT)
+  : path.resolve(__dirname, "../../../../../music");
+const mockMusicDriveRoot = path.parse(mockMusicRoot).root;
 
 export default defineConfig({
   base: './',
@@ -17,6 +21,18 @@ export default defineConfig({
   },
   server: {
     port: 5173,
-    strictPort: true
+    strictPort: true,
+    fs: {
+      allow: [
+        path.resolve(__dirname),
+        path.resolve(__dirname, ".."),
+        path.resolve(__dirname, "../.."),
+        path.resolve(__dirname, "../../.."),
+        path.resolve(__dirname, "../../../.."),
+        path.resolve(__dirname, "../../../../.."),
+        mockMusicRoot,
+        mockMusicDriveRoot
+      ]
+    }
   }
 });
