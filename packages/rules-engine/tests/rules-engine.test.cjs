@@ -51,13 +51,13 @@ function positiveEvent(sessionId, ts = "2026-05-21T10:00:00.000Z") {
   };
 }
 
-test("Rule 1: all non-favorites enter world through Orbit 3 only", () => {
+test("Rule 1: all non-favorites enter world through Orbit 1 only", () => {
   const ingested = ingestTrackForWorld({ ...baseTrack, saved: false });
-  assert.equal(ingested.worldOrbit, WORLD_ORBITS.ORBIT_3);
+  assert.equal(ingested.worldOrbit, WORLD_ORBITS.ORBIT_1);
   assert.equal(ingested.globalOrbit, null);
 });
 
-test("Rule 2: Orbit 3 candidates are selected by similarity to Orbit 1 songs in the same world", () => {
+test("Rule 2: re-entry candidates are selected by similarity anchors in the same world", () => {
   const orbit1Songs = [
     { id: "o1", title: "Anchor", genre: "alt-soul", moodTags: ["night", "warm"] }
   ];
@@ -68,7 +68,7 @@ test("Rule 2: Orbit 3 candidates are selected by similarity to Orbit 1 songs in 
   const selected = selectOrbit3CandidatesFromOrbit1({ orbit1Songs, candidateSongs: candidates, limit: 1 });
   assert.equal(selected.length, 1);
   assert.equal(selected[0].id, "a");
-  assert.equal(selected[0].worldOrbit, WORLD_ORBITS.ORBIT_3);
+  assert.equal(selected[0].worldOrbit, WORLD_ORBITS.ORBIT_1);
 });
 
 test("Rule 3: favorites enter global listener orbit, not world orbit", () => {
@@ -89,13 +89,13 @@ test("Rule 4: favorites cannot be demoted or archived from skips", () => {
 
 test("Rule 5: non-favorites move inward only by holding attention across sessions", () => {
   const oneSession = evaluateTrackMovement(
-    { ...baseTrack, worldOrbit: WORLD_ORBITS.ORBIT_3, rotationScore: 48, saved: false },
+    { ...baseTrack, worldOrbit: WORLD_ORBITS.ORBIT_1, rotationScore: 48, saved: false },
     [positiveEvent("session_one")]
   );
-  assert.equal(oneSession.worldOrbit, WORLD_ORBITS.ORBIT_3);
+  assert.equal(oneSession.worldOrbit, WORLD_ORBITS.ORBIT_1);
 
   const twoSessions = evaluateTrackMovement(
-    { ...baseTrack, worldOrbit: WORLD_ORBITS.ORBIT_3, rotationScore: 48, saved: false },
+    { ...baseTrack, worldOrbit: WORLD_ORBITS.ORBIT_1, rotationScore: 48, saved: false },
     [positiveEvent("session_one"), positiveEvent("session_two")]
   );
   assert.equal(twoSessions.worldOrbit, WORLD_ORBITS.ORBIT_2);
@@ -103,14 +103,14 @@ test("Rule 5: non-favorites move inward only by holding attention across session
 
 test("Rule 6: non-favorites move outward only from repeated skips across different sessions", () => {
   const sameSession = evaluateTrackMovement(
-    { ...baseTrack, worldOrbit: WORLD_ORBITS.ORBIT_1, rotationScore: 62, saved: false },
+    { ...baseTrack, worldOrbit: WORLD_ORBITS.ORBIT_3, rotationScore: 62, saved: false },
     [skipEvent("same"), skipEvent("same")]
   );
   assert.equal(countDistinctSkipSessions([skipEvent("same"), skipEvent("same")]), 1);
-  assert.equal(sameSession.worldOrbit, WORLD_ORBITS.ORBIT_1);
+  assert.equal(sameSession.worldOrbit, WORLD_ORBITS.ORBIT_3);
 
   const differentSessions = evaluateTrackMovement(
-    { ...baseTrack, worldOrbit: WORLD_ORBITS.ORBIT_1, rotationScore: 62, saved: false },
+    { ...baseTrack, worldOrbit: WORLD_ORBITS.ORBIT_3, rotationScore: 62, saved: false },
     [skipEvent("s1"), skipEvent("s2")]
   );
   assert.equal(differentSessions.worldOrbit, WORLD_ORBITS.ORBIT_2);
@@ -139,7 +139,7 @@ test("Rule 8: after skip-spree threshold, ignore skip inputs for song demotion",
   assert.equal(result.rotationScore, 55);
 });
 
-test("Rule 9: archived songs may re-enter Orbit 3 only limited number of times", () => {
+test("Rule 9: archived songs may re-enter Orbit 1 only limited number of times", () => {
   assert.equal(canReenterFromArchive({ archiveRetestCount: 0 }, { archiveReentryMax: 3 }), true);
   assert.equal(canReenterFromArchive({ archiveRetestCount: 2 }, { archiveReentryMax: 3 }), true);
   assert.equal(canReenterFromArchive({ archiveRetestCount: 3 }, { archiveReentryMax: 3 }), false);
@@ -152,8 +152,8 @@ test("Rule 10: goal is reducing skipping, not rewarding endless skipping", () =>
 
 test("session summary triggers promotion/demotion and world switch suggestion", () => {
   const tracks = [
-    { ...baseTrack, id: "promote-me", world: "Night Drive", worldOrbit: "orbit_3", saved: false, rotationScore: 50 },
-    { ...baseTrack, id: "demote-me", world: "Night Drive", worldOrbit: "orbit_1", saved: false, rotationScore: 60 }
+    { ...baseTrack, id: "promote-me", world: "Night Drive", worldOrbit: "orbit_1", saved: false, rotationScore: 50 },
+    { ...baseTrack, id: "demote-me", world: "Night Drive", worldOrbit: "orbit_3", saved: false, rotationScore: 60 }
   ];
   const events = [
     { trackId: "promote-me", world: "Night Drive", ...positiveEvent("s1", "2026-05-21T10:00:00.000Z"), percentListened: 96 },

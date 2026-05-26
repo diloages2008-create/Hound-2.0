@@ -1,10 +1,10 @@
-const {
+import {
   ORBITS,
   WORLD_ORBITS,
   ROTATION_OVERRIDE,
   normalizeTrack,
   clamp
-} = require("@hound/domain-types");
+} from "@hound/domain-types";
 
 const DEFAULT_POLICY = Object.freeze({
   rotationScoreThreshold: 55,
@@ -268,15 +268,10 @@ function evaluateTrackMovement(track, telemetry = [], policy = {}) {
     const key = `${event.timestamp || ""}__${toSessionKey(event)}`;
     return !spreeKeys.has(key);
   });
-  const countSkipsAgainstTrack = effectiveTelemetry.some((event) => {
-    const listened = Number(event.percent_listened) || 0;
-    return Boolean(event.manual_skip || event.skipped_early || listened <= nextPolicy.earlySkipThresholdPercent);
-  });
   const scored = scoreTrackFromTelemetry(track, effectiveTelemetry, nextPolicy);
   const previousOrbit = Object.values(WORLD_ORBITS).includes(scored.worldOrbit)
     ? scored.worldOrbit
     : WORLD_ORBITS.ORBIT_1;
-  const preferredOrbit = resolveWorldOrbit(scored, nextPolicy);
   const skipSessionCount = countDistinctSkipSessions(effectiveTelemetry, nextPolicy);
   const positiveSessionCount = countDistinctPositiveSessions(effectiveTelemetry);
 
@@ -461,7 +456,32 @@ function evaluateSessionSummary({
   return { tracks: updatedTracks, updates, worldSuggestions };
 }
 
-module.exports = {
+export {
+  DEFAULT_POLICY,
+  LISTENER_GLOBAL_FAVORITES_ORBIT,
+  withPolicy,
+  isFavoriteTrack,
+  ingestTrackForWorld,
+  scoreTrackFromTelemetry,
+  buildOrbitPools,
+  pickNextTrack,
+  resolveWorldOrbit,
+  evaluateTrackMovement,
+  countDistinctSkipSessions,
+  countDistinctPositiveSessions,
+  countConsecutiveSkips,
+  isWorldSkipSpree,
+  shouldCountSkipsAgainstTrack,
+  getWorldSkipSpreeEvents,
+  shouldSwitchWorld,
+  getArchivePath,
+  canReenterFromArchive,
+  selectOrbit3CandidatesFromOrbit1,
+  evaluateSessionSummary,
+  suggestNextAlbums
+};
+
+export default {
   DEFAULT_POLICY,
   LISTENER_GLOBAL_FAVORITES_ORBIT,
   withPolicy,

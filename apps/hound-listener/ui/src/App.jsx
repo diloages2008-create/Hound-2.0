@@ -1,6 +1,7 @@
 ﻿import React, { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { createLibraryProvider, PROVIDER_MODE } from "./libraryProvider.js";
 import { selectNextRecommendedTrack } from "./rulesEngineBridge.js";
+import { createSessionId, evaluateListenerSession } from "./listenerTelemetryEngine.js";
 
 const NAV = [
   { key: "now", label: "Now Playing" },
@@ -90,6 +91,9 @@ function normalizeTrack(track) {
 export default function App() {
   const providerRef = useRef(createLibraryProvider());
   const audioRef = useRef(null);
+  const sessionIdRef = useRef(createSessionId());
+  const learningEventsRef = useRef([]);
+  const tracksRef = useRef([]);
 
   const [tracks, setTracks] = useState([]);
   const [transport, dispatchTransport] = useReducer(transportReducer, initialTransport);
@@ -144,6 +148,10 @@ export default function App() {
     () => albums.filter((a) => a.title.toLowerCase().includes(searchLower) || a.artist.toLowerCase().includes(searchLower)),
     [albums, searchLower]
   );
+
+  useEffect(() => {
+    tracksRef.current = tracks;
+  }, [tracks]);
 
   useEffect(() => {
     const boot = async () => {
@@ -205,6 +213,39 @@ export default function App() {
     audio.muted = muted;
     audio.volume = muted ? 0 : volume;
   }, [volume, muted]);
+
+  const calcPercentListened = (track, positionSec) => {
+    const total = Number(track?.durationSec || 0);
+    if (!total) return 0;
+    return Math.max(0, Math.min(100, (Number(positionSec || 0) / total) * 100));
+  };
+
+  const applyLocalLearning = () => {
+    if (!learningEventsRef.current.length) return;
+    const currentTracks = tracksRef.current || [];
+    if (!currentTracks.length) return;
+    const result = evaluateListenerSession({
+      tracks: currentTracks,
+      events: learningEventsRef.current
+    });
+    setTracks(result.tracks.map(normalizeTrack));
+  };
+
+  const recordLearningEvent = ({ track, payload = {} }) => {
+    if (!track?.id) return;
+    learningEventsRef.current.push({
+      trackId: track.id,
+      world: track.world || "Normal",
+      sessionId: sessionIdRef.current,
+      timestamp: new Date().toISOString(),
+      percentListened: Number(payload.percentListened || 0),
+      skippedEarly: Boolean(payload.skippedEarly),
+      manualSkip: Boolean(payload.manualSkip),
+      completedPlay: Boolean(payload.completedPlay),
+      replayedSameSession: Number(payload.replayedSameSession || 0)
+    });
+    applyLocalLearning();
+  };
 
   const emitLearningSignal = (type, payload = {}) => {
     const trackId = payload.trackId || currentTrack?.id || null;
@@ -284,6 +325,17 @@ export default function App() {
     // Next at timeline end is the only place manual skip is emitted
     // and a new recommendation is appended.
     emitLearningSignal("skip", { trackId: currentTrack.id, reason: "next_button" });
+    const audio = audioRef.current;
+    const position = Number(audio?.currentTime || 0);
+    const percentListened = calcPercentListened(currentTrack, position);
+    recordLearningEvent({
+      track: currentTrack,
+      payload: {
+        percentListened,
+        skippedEarly: percentListened <= 25,
+        manualSkip: true
+      }
+    });
     const rec = chooseRecommendation();
     if (!rec) return;
     setPendingPlaySource("backend");
@@ -296,6 +348,13 @@ export default function App() {
     // TRANSPORT FREEZE:
     // Natural end emits song_finished, never skip.
     emitLearningSignal("song_finished", { trackId: currentTrack.id });
+    recordLearningEvent({
+      track: currentTrack,
+      payload: {
+        percentListened: 100,
+        completedPlay: true
+      }
+    });
     // If forward history exists, consume it first; no recommendation call.
     if (transport.currentIndex < transport.timeline.length - 1) {
       moveToTimelineTrack(transport.currentIndex + 1, "history");
@@ -316,9 +375,18 @@ export default function App() {
     const audio = audioRef.current;
     if (!audio || !currentTrack) return;
     if (audio.currentTime > 4) {
+      const replayedTrack = currentTrack;
+      const replayPosition = Number(audio.currentTime || 0);
       audio.currentTime = 0;
       if (!isPlaying) setCurrentTime(0);
       emitLearningSignal("previous_restart_current", { trackId: currentTrack.id });
+      recordLearningEvent({
+        track: replayedTrack,
+        payload: {
+          percentListened: calcPercentListened(replayedTrack, replayPosition),
+          replayedSameSession: 1
+        }
+      });
       return;
     }
     // TRANSPORT FREEZE:

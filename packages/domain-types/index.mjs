@@ -1,4 +1,4 @@
-import core from "./core.cjs";
+import * as core from "./core.mjs";
 
 export const ORBITS = core.ORBITS;
 export const WORLD_ORBITS = core.WORLD_ORBITS;

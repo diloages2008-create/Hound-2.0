@@ -28,7 +28,7 @@ export function ingestTrackForWorld(track = {}) {
   if (isFavoriteTrack(track)) {
     return { ...track, globalOrbit: LISTENER_GLOBAL_FAVORITES_ORBIT, worldOrbit: null };
   }
-  return { ...track, worldOrbit: WORLD_ORBITS.ORBIT_3, globalOrbit: null };
+  return { ...track, worldOrbit: WORLD_ORBITS.ORBIT_1, globalOrbit: null };
 }
 
 function toSessionKey(event, idx = 0) {
@@ -142,23 +142,23 @@ function evaluateTrackMovement(track, telemetry = [], worldRecentEvents = []) {
   const score = computeScore(track, effectiveTelemetry);
   const skipSessions = countDistinctSkipSessions(effectiveTelemetry);
   const positiveSessions = countDistinctPositiveSessions(effectiveTelemetry);
-  const previousOrbit = track.worldOrbit || WORLD_ORBITS.ORBIT_3;
+  const previousOrbit = track.worldOrbit || WORLD_ORBITS.ORBIT_1;
   let nextOrbit = previousOrbit;
 
-  if (previousOrbit === WORLD_ORBITS.ORBIT_1 && score < POLICY.demotionScoreFloorOrbit1 && skipSessions >= POLICY.minSkipSessionsForDemotion) nextOrbit = WORLD_ORBITS.ORBIT_2;
-  else if (previousOrbit === WORLD_ORBITS.ORBIT_2 && score < POLICY.demotionScoreFloorOrbit2 && skipSessions >= POLICY.minSkipSessionsForDemotion) nextOrbit = WORLD_ORBITS.ORBIT_3;
-  else if (previousOrbit === WORLD_ORBITS.ORBIT_3 && score >= POLICY.promotionScoreFloorOrbit2 && positiveSessions >= POLICY.minPositiveSessionsForPromotion) nextOrbit = WORLD_ORBITS.ORBIT_2;
-  else if (previousOrbit === WORLD_ORBITS.ORBIT_2 && score >= POLICY.promotionScoreFloorOrbit1 && positiveSessions >= POLICY.minPositiveSessionsForPromotion) nextOrbit = WORLD_ORBITS.ORBIT_1;
+  if (previousOrbit === WORLD_ORBITS.ORBIT_3 && score < POLICY.demotionScoreFloorOrbit1 && skipSessions >= POLICY.minSkipSessionsForDemotion) nextOrbit = WORLD_ORBITS.ORBIT_2;
+  else if (previousOrbit === WORLD_ORBITS.ORBIT_2 && score < POLICY.demotionScoreFloorOrbit2 && skipSessions >= POLICY.minSkipSessionsForDemotion) nextOrbit = WORLD_ORBITS.ORBIT_1;
+  else if (previousOrbit === WORLD_ORBITS.ORBIT_1 && score >= POLICY.promotionScoreFloorOrbit2 && positiveSessions >= POLICY.minPositiveSessionsForPromotion) nextOrbit = WORLD_ORBITS.ORBIT_2;
+  else if (previousOrbit === WORLD_ORBITS.ORBIT_2 && score >= POLICY.promotionScoreFloorOrbit1 && positiveSessions >= POLICY.minPositiveSessionsForPromotion) nextOrbit = WORLD_ORBITS.ORBIT_3;
 
-  const archived = nextOrbit === WORLD_ORBITS.ORBIT_3 && skipSessions >= POLICY.moodSwitchSkipThreshold;
+  const archived = nextOrbit === WORLD_ORBITS.ORBIT_1 && skipSessions >= POLICY.moodSwitchSkipThreshold;
   return {
     ...track,
     rotationScore: score,
     worldOrbit: nextOrbit,
     movement:
       archived ? "archive"
-      : previousOrbit !== nextOrbit && nextOrbit === WORLD_ORBITS.ORBIT_1 ? "promotion"
-      : previousOrbit !== nextOrbit && nextOrbit === WORLD_ORBITS.ORBIT_2 && previousOrbit === WORLD_ORBITS.ORBIT_3 ? "promotion"
+      : previousOrbit !== nextOrbit && nextOrbit === WORLD_ORBITS.ORBIT_3 ? "promotion"
+      : previousOrbit !== nextOrbit && nextOrbit === WORLD_ORBITS.ORBIT_2 && previousOrbit === WORLD_ORBITS.ORBIT_1 ? "promotion"
       : previousOrbit !== nextOrbit ? "demotion" : "stable",
     archived,
     worldProblem
@@ -197,8 +197,8 @@ export function evaluateSessionSummary({ tracks = [], events = [] }) {
       rotationScore: result.rotationScore,
       worldOrbit: result.worldOrbit,
       globalOrbit: track.saved ? LISTENER_GLOBAL_FAVORITES_ORBIT : null,
-      orbit: track.saved ? null : (result.worldOrbit === WORLD_ORBITS.ORBIT_1 ? "rotation" : result.worldOrbit === WORLD_ORBITS.ORBIT_2 ? "recent" : "discovery"),
-      rotation: result.worldOrbit === WORLD_ORBITS.ORBIT_1 || track.rotationOverride === "force_on",
+      orbit: track.saved ? null : (result.worldOrbit === WORLD_ORBITS.ORBIT_3 ? "rotation" : result.worldOrbit === WORLD_ORBITS.ORBIT_2 ? "recent" : "discovery"),
+      rotation: result.worldOrbit === WORLD_ORBITS.ORBIT_3 || track.rotationOverride === "force_on",
       archivedAt: result.archived ? new Date().toISOString() : track.archivedAt || null
     };
     updates.push({ trackId: track.id, movement: result.movement, worldProblem: result.worldProblem, archived: result.archived });

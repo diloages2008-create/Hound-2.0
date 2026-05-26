@@ -1,4 +1,4 @@
-import core from "./core.cjs";
+import * as core from "./core.mjs";
 
 export const DEFAULT_POLICY = core.DEFAULT_POLICY;
 export const LISTENER_GLOBAL_FAVORITES_ORBIT = core.LISTENER_GLOBAL_FAVORITES_ORBIT;
